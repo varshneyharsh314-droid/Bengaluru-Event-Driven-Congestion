@@ -1,0 +1,97 @@
+# Flipkart Gridlock Hackathon: Event-Driven Congestion EDA Report
+
+This report summarizes the Exploratory Data Analysis (EDA) and feature engineering conducted on the incident-event logging dataset for the Bengaluru Event-Driven Congestion hackathon task. The final notebook, `EDA_Event_Driven_Congestion.ipynb`, has been programmatically generated and fully executed in the workspace.
+
+---
+
+## 1. Data Summary & Handling Missing Values
+
+The raw dataset contains **8,173 records** logging unplanned traffic incidents (e.g., vehicle breakdowns, accidents, water-logging) and planned events (e.g., construction, public events) in Bengaluru.
+
+### Missing Value Treatment:
+- **`priority`** (0.02% missing): Missing values were imputed with the mode, **'High'**.
+- **`requires_road_closure`**: Standardized to boolean (`True` / `False`).
+- **`zone`** (57.86% missing) & **`junction`** (69.29% missing): Missing indicators were filled with **'Unknown'** to preserve records while keeping spatial category markers.
+- **`end_datetime`** (94.00% missing): A massive chunk of raw end-times was missing. To solve this, we parsed the dates and applied a coalesced fallback strategy:
+  1. Retrieve `end_datetime`.
+  2. Fall back to `closed_datetime` (61.57% missing).
+  3. Fall back to `resolved_datetime` (99.09% missing).
+  4. For the remaining 55% of the dataset that still lacked completion times, we computed the **median duration (in minutes)** grouped by each specific `event_cause` (e.g., ~41 mins for breakdowns/accidents, ~726 mins for construction) and imputed the duration.
+  5. The final target `end_datetime` was computed as `start_datetime + duration`.
+
+---
+
+## 2. Feature Engineering
+
+We engineered the following features to capture temporal and structural dimensions of traffic congestion:
+- **`hour`**: Starting hour of the event (0 to 23).
+- **`weekday`**: Day of the week (0 = Monday, 6 = Sunday).
+- **`is_weekend`**: Binary flag (1 if Saturday or Sunday, else 0).
+- **`time_of_day`**: Classified into `morning_peak` (8–11 AM), `midday` (11 AM–5 PM), `evening_peak` (5–8 PM), and `night` (8 PM–8 AM).
+- **`log_duration`**: $\log_{10}(\text{duration} + 1)$ to normalize the high skewness of incident durations (which ranges from minutes to weeks).
+
+---
+
+## 3. Congestion Proxy Label Design
+
+Since there is no explicit target variable indicating congestion severity, we synthesized a domain-knowledge-driven **Congestion Score** and binned it to form **Congestion Proxy Labels** (`Low`, `Medium`, `High`):
+
+$$\text{Congestion Score} = \text{Base Cause Score} + \text{Road Closure Bonus} + \text{Priority Bonus} + \text{Peak Hour Bonus} + \text{Corridor Bonus}$$
+
+### Scoring Rules:
+1. **Base Cause Score**:
+   - `accident` = 10 | `water_logging` / `congestion` = 9 | `tree_fall` = 8 | `vehicle_breakdown` = 7 | `road_conditions` = 6 | `construction` / `public_event` = 5 | others = 4
+2. **Road Closure**: +5 if `requires_road_closure` is `True`.
+3. **Priority**: +3 if `High` priority, +1 if `Low`.
+4. **Time of Day (Peak Coincidence)**:
+   - +3 if starting during `morning_peak` or `evening_peak`.
+   - +1.5 if starting during `midday`.
+   - +0 if starting during `night`.
+5. **Corridor**: +2 if event occurs on a primary designated corridor (not `'Non-corridor'`).
+
+### Binned Classes:
+* **Low Congestion** (Score < 10): 3,061 events
+* **Medium Congestion** (10 $\le$ Score < 15): 4,374 events
+* **High Congestion** (Score $\ge$ 15): 738 events
+
+---
+
+## 4. Visualizations
+
+Here are the key insights visualized from the dataset:
+
+### Event Type Distribution
+Most traffic incidents in the log are unplanned (e.g., breakdown, accident).
+![Event Type Distribution](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_event_types.png)
+
+### Root Causes
+Vehicle breakdowns represent over 60% of all events, making them the leading trigger of event-driven congestion.
+![Event Causes](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_event_causes.png)
+
+### Temporal Trends
+Incidents peak strongly during commute hours (9 AM and 6 PM) and drop on weekends.
+![Temporal Patterns](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_temporal_patterns.png)
+
+### Duration Profiles
+Durations vary wildly: breakdowns and accidents are cleared quickly (median ~41 mins), whereas potholes, road conditions, and construction can persist for days or weeks.
+![Duration Analysis](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_duration_analysis.png)
+
+### Spatial Heatmap (Bengaluru Coordinates)
+Plotting the GPS coordinates shows high event density along main arteries, particularly the Outer Ring Road (ORR) and Tumkur Road corridors.
+![Spatial Distribution](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_spatial_distribution.png)
+
+### Congestion Class Distribution
+Our proxy label categorizes most incidents as Medium severity, with a significant tail of High-severity disruptions.
+![Congestion Distribution](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_congestion_distribution.png)
+
+### Feature Correlation Heatmap
+Shows how time of day, road closures, and event characteristics correlate with the final congestion index.
+![Correlation Heatmap](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/artifacts/visualizations_correlation_matrix.png)
+
+---
+
+## 5. Saved Outputs
+
+The following deliverables have been written to the workspace `u:\Theme2`:
+1. **`EDA_Event_Driven_Congestion.ipynb`**: The complete Jupyter Notebook, fully executed, with markdown explanations, code cells, and pre-rendered plots.
+2. **`processed_congestion_data.csv`**: The clean and engineered dataset ready for modeling.

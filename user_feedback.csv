@@ -1,0 +1,2 @@
+timestamp,event_type,event_cause,requires_road_closure,junction,predicted_delay_min,actual_delay_min,comments
+2026-06-16 22:58:25,unplanned,accident,False,SilkBoardJunc,135,150,

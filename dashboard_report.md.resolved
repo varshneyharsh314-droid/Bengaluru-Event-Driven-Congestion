@@ -1,0 +1,68 @@
+# Streamlit Congestion Dashboard Walkthrough & Deployment Report
+
+This report outlines the features, mechanics, and validation of the interactive Streamlit dashboard built to simulate traffic events, predict congestion risk using the trained XGBoost model, suggest emergency logistics, and capture closed-loop user feedback.
+
+---
+
+## 1. Dashboard Architecture & Interface
+
+The dashboard is implemented in `app.py` and is currently running locally:
+* **Dashboard Local URL**: [http://localhost:8501](http://localhost:8501)
+* **Status**: active and running in background headless mode.
+
+### Visual Interface Modules:
+1. **Header Banner**: Prominent Dark/Indigo gradient banner ("BENGALURU ROAD CONGESTION CONTROL CENTER").
+2. **KPI Scorecards**: Four prominent metric boxes indicating:
+   - **Congestion Risk Level** (Low, Medium, High) with dynamic, color-coded borders (Green, Orange, Red) and model confidence percentages.
+   - **Expected Queue Delay** (in minutes) based on event duration, cause, and predicted severity.
+   - **Required Police Officers** (calculated dynamically based on risk level, priority, and road closure).
+   - **Barricades Needed** (units required to seal off lanes/routes).
+3. **Interactive Map (Folium)**: Left pane display featuring:
+   - Historical event hotspots plotted as small circles (color-coded by severity).
+   - A pulsing/prominent colored Marker pin indicating the current simulated event location.
+4. **Logistics & Routing Details**: Right pane display featuring:
+   - Identified target corridor zone and nearest junction.
+   - Detailed, localized traffic diversion text description mapping to specific key junctions (e.g. Silk Board, Hebbal, Peenya).
+   - Probability progress bars showing risk spectrum scores.
+5. **Closed-Loop Feedback Portal**: Bottom pane containing a database feedback form allowing users to submit experienced queue times to recalibrate predictions.
+
+---
+
+## 2. Dynamic Features & Interaction Mechanics
+
+### Interactive Event Simulator (Sidebar):
+Users can tweak all parameters expected by the XGBoost pipeline:
+- **Event type** (`unplanned`, `planned`)
+- **Event cause** (12 root causes)
+- **Priority** (`High`, `Low`)
+- **Requires Road Closure** (Boolean checkbox)
+- **Hour of Day** (0-23 slider)
+- **Day of Week** (Monday-Sunday select slider)
+- **Event Duration** (0.1 to 24.0 hours slider)
+- **Zone & Junction** (Dropdown selections matching training data categories)
+
+### Real-time Map Click Binding:
+Using `streamlit-folium`, clicking anywhere on the interactive map retrieves the clicked coordinates (`lat`, `lng`) and dynamically updates the simulated event's Latitude and Longitude input fields. The application automatically reruns to make a new prediction for the clicked coordinates.
+
+---
+
+## 3. Closed-Loop Feedback Loop
+
+To support continuous model calibration on the ground, a form at the bottom allows operators or drivers to log actual delay times:
+- **Input Fields**: System Predicted Delay (read-only), Actual Experienced Delay (minutes), and comments.
+- **Storage**: Submitting the form appends the records directly to `user_feedback.csv` in the workspace:
+
+```
+timestamp,event_type,event_cause,requires_road_closure,junction,predicted_delay_min,actual_delay_min,comments
+2026-06-16 22:58:25,unplanned,accident,False,SilkBoardJunc,135,150,
+```
+
+---
+
+## 4. Visual Verification (Browser Recording)
+
+A browser subagent was launched to verify all visual and functional features:
+- **Interaction Video**: A visual recording of the subagent interacting with the dashboard, clicking the map, and submitting the feedback form is stored as a WebP animation:
+  * [Streamlit Dashboard Interaction Video](file:///C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/streamlit_dashboard_final_1781630582794.webp)
+- **Final Interface State**: Below is the verified state of the dashboard during feedback submission:
+  * ![Streamlit Feedback Form Submission](C:/Users/lenovo/.gemini/antigravity/brain/2d2e1604-43c3-41ae-9898-ff5199fa22aa/.system_generated/click_feedback/click_feedback_1781630871340.png)
