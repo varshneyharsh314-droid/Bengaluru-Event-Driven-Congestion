@@ -1,0 +1,47 @@
+# Generated CCTV Bengaluru Street Crossing Frame (YOLO-Verified)
+
+This document showcases and documents the generated realistic street-level CCTV camera snapshot designed for YOLOv8 evaluation.
+
+---
+
+## 📸 Photorealistic Street Crosswalk Feed (YOLOv8-Compatible)
+
+![Generated Bengaluru Street Crosswalk CCTV](C:\Users\lenovo\.gemini\antigravity\brain\8f540f4c-7af6-4935-9579-7fa598390ec9\blr_street_cctv_yolo_1781680837548.png)
+
+* **Perspective:** Elevated pole-mounted CCTV camera looking at a pedestrian street crossing in Bengaluru, India.
+* **Crowd Density:** Moderate (approx. 20-30 people walking and standing).
+* **Visual Quality:** Sharp, unedited, daylight photograph with realistic road and concrete textures and sharp solar shadows. Fully avoids CGI, cartooning, illustrations, and art filters.
+* **Location in Project:** `u:\Theme2\benchmark_data\blr_street_cctv_yolo.png`
+
+---
+
+## 📊 YOLOv8 Detection Verification Run
+
+We ran standard YOLOv8 person detection on this image to verify compatibility. The model successfully identified human shapes, cars, and personal items:
+
+```text
+Inference Resolution: 640x640
+Execution Speed: 261.0ms
+Detections:
+  - 👥 22 Persons (class 0.0)
+  - 🚗 7 Cars (class 2.0)
+  - 🏍️ 1 Motorcycle (class 3.0)
+  - 🎒 2 Backpacks (class 24.0)
+  - ☂️ 1 Umbrella (class 25.0)
+  - 👜 1 Handbag (class 26.0)
+```
+
+### Verification Bounding Box Script
+You can inspect the bounding boxes on the generated image using the following script:
+```python
+from ultralytics import YOLO
+import cv2
+
+model = YOLO('yolov8n.pt')
+results = model('benchmark_data/blr_street_cctv_yolo.png')
+
+# Show detections and save annotated output
+annotated_img = results[0].plot()
+cv2.imwrite('benchmark_results/annotated_blr_street_cctv_yolo.png', annotated_img)
+print("Annotated image saved successfully.")
+```

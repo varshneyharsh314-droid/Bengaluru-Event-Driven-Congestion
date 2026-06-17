@@ -14,7 +14,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 import xgboost as xgb
-from crowd_estimation import render_crowd_estimation_page
+from crowd_estimation import render_crowd_estimation_page, render_crowd_evaluation_page
 from police_alerts_page import render_police_alerts_page
 from emergency_corridor_page import render_emergency_corridor_page
 from timeline_heatmap import render_timeline_heatmap_page
@@ -267,6 +267,7 @@ app_page = st.sidebar.radio(
         "🗺️ Spatial Density Heatmap",
         "⏰ Timeline Replay Heatmap",
         "👥 Crowd Estimation Center",
+        "📊 Crowd Estimation Evaluation",
         "🚨 Police Alert Dispatcher",
         "🚑 Emergency Corridor",
         "🤖 Feedback & Retraining Terminal"
@@ -635,7 +636,13 @@ elif app_page == "👥 Crowd Estimation Center":
     render_crowd_estimation_page()
 
 # -------------------------------------------------------------
-# PAGE 4: POLICE ALERT DISPATCHER
+# PAGE 4.5: CROWD ESTIMATION EVALUATION
+# -------------------------------------------------------------
+elif app_page == "📊 Crowd Estimation Evaluation":
+    render_crowd_evaluation_page()
+
+# -------------------------------------------------------------
+# PAGE 5: POLICE ALERT DISPATCHER
 # -------------------------------------------------------------
 elif app_page == "🚨 Police Alert Dispatcher":
     render_police_alerts_page()

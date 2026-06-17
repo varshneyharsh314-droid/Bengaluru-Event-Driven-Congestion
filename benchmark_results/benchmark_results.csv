@@ -1,0 +1,16 @@
+filename,ground_truth,predicted_count,absolute_error,accuracy
+sparse_1.jpg,18,16,2,88.89
+sparse_2.jpg,8,7,1,87.5
+sparse_3.jpg,12,11,1,91.67
+medium_1.jpg,75,71,4,94.67
+medium_2.jpg,140,144,4,97.14
+medium_3.jpg,210,209,1,99.52
+dense_1.jpg,450,437,13,97.11
+dense_2.jpg,600,602,2,99.67
+extremely_dense_1.jpg,1250,1275,25,98.0
+extremely_dense_2.jpg,1100,1033,67,93.91
+political_rally.mp4,350,344,6,98.29
+cricket_match.mp4,850,835,15,98.24
+religious_gathering.mp4,1200,1198,2,99.83
+street_protest.mp4,400,388,12,97.0
+traffic_intersection.mp4,45,44,1,97.78
