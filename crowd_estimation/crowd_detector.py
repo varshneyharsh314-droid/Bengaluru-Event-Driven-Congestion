@@ -144,7 +144,7 @@ class CrowdDetector:
             "barricades_recommended": barricades_req
         }
 
-    def detect_image(self, image, confidence=0.05):
+    def detect_image(self, image, confidence=0.03):
         """
         Runs person detection on a PIL Image or numpy array.
         Implements Slicing Aided Hyper Inference (SAHI) for high-resolution images
@@ -231,7 +231,7 @@ class CrowdDetector:
         annotated_img = cv_img.copy()
         
         if len(candidate_boxes) > 0:
-            keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=0.35)
+            keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=0.55)
             
             for idx in keep:
                 x1, y1, x2, y2 = candidate_boxes[idx]
