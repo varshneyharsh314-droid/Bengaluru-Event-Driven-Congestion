@@ -208,7 +208,7 @@ class CrowdDetector:
                 res_crop = self.model.predict(
                     crop, 
                     conf=confidence, 
-                    imgsz=800, 
+                    imgsz=1280, 
                     classes=[0], 
                     verbose=False
                 )
