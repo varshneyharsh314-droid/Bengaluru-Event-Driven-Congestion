@@ -144,14 +144,13 @@ class CrowdDetector:
             "barricades_recommended": barricades_req
         }
 
-    def detect_image(self, image, confidence=0.02):
+    def detect_image(self, image, confidence=None):
         """
         Runs person detection on a PIL Image or numpy array.
-        Implements Slicing Aided Hyper Inference (SAHI) for high-resolution images
-        to maximize recall on extremely dense or distant crowd clusters.
-        Returns:
-            annotated_image: PIL Image or numpy array with boxes drawn
-            count: Number of persons detected
+        Dynamically adapts inference settings (SAHI grid size, confidence threshold, 
+        NMS IoU merge thresholds, and minimum box sizes) based on a first-pass 
+        density assessment to prevent overcounting in sparse scenes and undercounting 
+        in dense rallies.
         """
         if self.model is None:
             # Run simulation fallback
@@ -166,16 +165,58 @@ class CrowdDetector:
             
         img_h, img_w, _ = cv_img.shape
         
+        # 1. First-Pass: Run a fast full-frame prediction to estimate base density
+        first_pass_res = self.model.predict(
+            cv_img,
+            conf=0.15,
+            imgsz=640,
+            classes=[0],
+            verbose=False
+        )
+        
+        base_count = 0
+        if len(first_pass_res) > 0:
+            base_count = len(first_pass_res[0].boxes)
+            
+        # 2. Dynamic Settings Allocation
+        # User can override confidence, but otherwise we set it adaptively
+        if confidence is None:
+            if base_count < 15:
+                # Sparse scene: e.g. pedestrian crossing, residential road
+                conf_thresh = 0.20
+                nms_iou = 0.40
+                min_box_size = 15
+                grid_size = 0  # No slicing needed
+            elif base_count < 50:
+                # Medium scene: busy intersection, market entrance
+                conf_thresh = 0.10
+                nms_iou = 0.45
+                min_box_size = 10
+                grid_size = 2  # 2x2 grid
+            else:
+                # Dense/Extreme scene: political rally, protest, stadium exit
+                conf_thresh = 0.03
+                nms_iou = 0.55
+                min_box_size = 4
+                grid_size = 4  # 4x4 grid
+        else:
+            # User explicit override
+            conf_thresh = confidence
+            nms_iou = 0.50
+            min_box_size = 8
+            grid_size = 3
+            
+        # 3. Execution Phase
         candidate_boxes = []
         candidate_scores = []
         
-        # 1. Run Base Full-Frame Inference
+        # Run base full-frame prediction at the adaptive resolution
         base_imgsz = max(640, min(1280, max(img_h, img_w)))
         base_imgsz = (base_imgsz // 32) * 32
         
         results_full = self.model.predict(
             cv_img, 
-            conf=confidence, 
+            conf=conf_thresh, 
             imgsz=base_imgsz, 
             classes=[0], 
             verbose=False
@@ -185,30 +226,46 @@ class CrowdDetector:
             for box in results_full[0].boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 conf = float(box.conf[0])
-                if (x2 - x1) >= 4 and (y2 - y1) >= 4:
+                if (x2 - x1) >= min_box_size and (y2 - y1) >= min_box_size:
                     candidate_boxes.append([x1, y1, x2, y2])
                     candidate_scores.append(conf)
                     
-        # 2. Apply SAHI Slicing if image is sufficiently high resolution (>= 800px in either dimension)
-        if img_w >= 800 or img_h >= 800:
-            # High-Recall 4x4 Slicing Grid (16 overlapping patches)
-            slice_w = int(img_w * 0.30)
-            slice_h = int(img_h * 0.30)
-            
-            x_coords = [0, int(img_w * 0.23), int(img_w * 0.46), img_w - slice_w]
-            y_coords = [0, int(img_h * 0.23), int(img_h * 0.46), img_h - slice_h]
-            
-            slices = []
-            for yc in y_coords:
-                for xc in x_coords:
-                    slices.append((xc, yc, xc + slice_w, yc + slice_h))
-            
+        # Apply SAHI Slicing based on the dynamic grid_size
+        if grid_size > 0 and (img_w >= 800 or img_h >= 800):
+            if grid_size == 2:
+                # 2x2 grid (55% slice size to ensure 10% overlap)
+                slice_w = int(img_w * 0.55)
+                slice_h = int(img_h * 0.55)
+                slices = [
+                    (0, 0, slice_w, slice_h),
+                    (img_w - slice_w, 0, img_w, slice_h),
+                    (0, img_h - slice_h, slice_w, img_h),
+                    (img_w - slice_w, img_h - slice_h, img_w, img_h)
+                ]
+                crop_imgsz = 800
+            elif grid_size == 3:
+                # 3x3 grid
+                slice_w = int(img_w * 0.40)
+                slice_h = int(img_h * 0.40)
+                x_coords = [0, int(img_w * 0.30), img_w - slice_w]
+                y_coords = [0, int(img_h * 0.30), img_h - slice_h]
+                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
+                crop_imgsz = 1024
+            else:  # grid_size == 4
+                # 4x4 grid
+                slice_w = int(img_w * 0.30)
+                slice_h = int(img_h * 0.30)
+                x_coords = [0, int(img_w * 0.23), int(img_w * 0.46), img_w - slice_w]
+                y_coords = [0, int(img_h * 0.23), int(img_h * 0.46), img_h - slice_h]
+                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
+                crop_imgsz = 1280
+                
             for sx1, sy1, sx2, sy2 in slices:
                 crop = cv_img[sy1:sy2, sx1:sx2]
                 res_crop = self.model.predict(
                     crop, 
-                    conf=confidence, 
-                    imgsz=1280, 
+                    conf=conf_thresh, 
+                    imgsz=crop_imgsz, 
                     classes=[0], 
                     verbose=False
                 )
@@ -222,16 +279,16 @@ class CrowdDetector:
                         gx1, gy1 = cx1 + sx1, cy1 + sy1
                         gx2, gy2 = cx2 + sx1, cy2 + sy1
                         
-                        if (gx2 - gx1) >= 4 and (gy2 - gy1) >= 4:
+                        if (gx2 - gx1) >= min_box_size and (gy2 - gy1) >= min_box_size:
                             candidate_boxes.append([gx1, gy1, gx2, gy2])
                             candidate_scores.append(conf)
                             
-        # 3. Apply Global NMS to prune duplicate detections in slice overlap zones
+        # 4. Apply Global NMS to prune duplicate detections in slice overlap zones
         count = 0
         annotated_img = cv_img.copy()
         
         if len(candidate_boxes) > 0:
-            keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=0.60)
+            keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=nms_iou)
             
             for idx in keep:
                 x1, y1, x2, y2 = candidate_boxes[idx]
