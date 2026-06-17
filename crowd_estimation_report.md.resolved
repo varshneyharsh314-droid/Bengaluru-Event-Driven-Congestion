@@ -1,0 +1,81 @@
+# YOLOv8 Crowd Estimation Module
+
+This report describes the architecture, implementation, and integration of the **Crowd Estimation Module** into the **AI Command Center for Bengaluru Traffic Police** project for the Flipkart Gridlock Hackathon.
+
+---
+
+## 1. System Architecture
+
+The newly integrated Crowd Estimation Module interfaces directly with CCTV feeds (images or videos) using **ultralytics YOLOv8** for human detection. The estimated pedestrian count is mapped to crowd density categories, which dynamically scale resource allocation recommendations and update the overall traffic congestion risk.
+
+```mermaid
+graph TD
+    A[CCTV Image / Video Upload] --> B[YOLOv8 Object Detector]
+    B -->|Filter Class 0: person| C[Pedestrian Count]
+    C --> D[Density Categorization]
+    D -->|Low / Medium / High / Extreme| E[Dynamic Resource Engine]
+    E -->|Scale Officers & Barricades| F[Updated Command Dashboard]
+    E -->|Update Congestion Risk| F
+```
+
+---
+
+## 2. Updated Directory Structure
+
+The project has been expanded to support modular computer vision additions while retaining the core hackathon files:
+
+```text
+Theme2/
+│
+├── crowd_estimation/                         # Crowd Estimation Module
+│   ├── __init__.py                           # Module package exports
+│   └── crowd_detector.py                     # YOLOv8 detection and Streamlit page components
+│
+├── processed_congestion_data.csv            # Historical traffic logs
+├── congestion_model.joblib                  # Serialized ML pipeline weights
+├── traffic_ops.db                           # Closed-loop feedback SQLite database
+├── app.py                                   # Consolidated multi-page Streamlit application (updated)
+├── optimization_engine.py                   # Resource rule engine
+├── route_recommender.py                     # NetworkX routing engine
+└── crowd_estimation_report.md               # Implementation walkthrough (this file)
+```
+
+---
+
+## 3. Crowd Density Thresholds & Resource Scaling Rules
+
+Pedestrian counts are categorized into four density buckets:
+
+| Pedestrian Count | Crowd Density | Congestion Risk Impact | Extra Police Personnel | Extra Barricades |
+| :--- | :--- | :--- | :---: | :---: |
+| **< 100** | **Low** | No change to predicted risk | +0 | +0 |
+| **100 - 500** | **Medium** | Elevate to at least **Medium** | +3 | +4 |
+| **500 - 2000** | **High** | Elevate to **High** | +6 | +8 |
+| **> 2000** | **Extreme** | Elevate to **Extreme** | +12 | +16 |
+
+### Dynamic Cap Upscaling:
+* **Police Personnel**: The standard cap of 20 officers is dynamically increased to **40 officers** under High/Extreme crowd situations to ensure sufficient crowd-control details.
+* **Barricade Units**: The standard cap of 30 barricades is dynamically increased to **50 units** to handle crowd control and physical cordons.
+
+---
+
+## 4. Key Code Files
+
+### A. Module Definition (`crowd_estimation/crowd_detector.py`)
+This file wraps YOLOv8 inference and exposes:
+1. `CrowdDetector`: A class that handles loading `yolov8n.pt`, running detection specifically on `person` (class index 0), and falling back to a robust mock simulator if GPU/weights are not loaded.
+2. `update_resources`: The logic mapping crowd counts to operational recommendations.
+3. `render_crowd_estimation_page`: The user-friendly Streamlit interface complete with file uploaders, live progress bars, real-time frame annotation, and interactive KPIs.
+
+---
+
+## 5. Walkthrough of the Streamlit Interface
+
+1. **Navigation Menu**: Select **`👥 Crowd Estimation Center`** from the sidebar.
+2. **Inference Mode**: Choose between **YOLOv8 Live Inference** (real-time computer vision detection) or **Simulated Prototype Mode (Fast)** (instantly generates mock bounding boxes and counts for presentation/hackathon pitches).
+3. **CCTV Feed Upload**: Upload a snapshot image (JPG/PNG) or a video file (MP4).
+4. **Interactive Dashboard**:
+   * Displays **Estimated/Peak Crowd Count**, **Density Category**, and **Updated Congestion Risk**.
+   * Shows updated numbers of **Recommended Police Officers** and **Barricade Units**.
+   * Displays the annotated image/video frames showing detected pedestrians with red bounding boxes.
+   * Triggers a critical alert banner when crowd density is **High** or **Extreme**.

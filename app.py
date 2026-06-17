@@ -14,6 +14,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 import xgboost as xgb
+from crowd_estimation import render_crowd_estimation_page
+from police_alerts_page import render_police_alerts_page
+from emergency_corridor_page import render_emergency_corridor_page
+from timeline_heatmap import render_timeline_heatmap_page
+
 
 # -------------------------------------------------------------
 # PAGE CONFIGURATION
@@ -260,6 +265,10 @@ app_page = st.sidebar.radio(
     [
         "🚦 Simulator & Optimizer",
         "🗺️ Spatial Density Heatmap",
+        "⏰ Timeline Replay Heatmap",
+        "👥 Crowd Estimation Center",
+        "🚨 Police Alert Dispatcher",
+        "🚑 Emergency Corridor",
         "🤖 Feedback & Retraining Terminal"
     ]
 )
@@ -614,7 +623,31 @@ elif app_page == "🗺️ Spatial Density Heatmap":
             st.dataframe(df_filtered[display_cols], use_container_width=True)
 
 # -------------------------------------------------------------
-# PAGE 3: FEEDBACK & RETRAINING TERMINAL
+# PAGE 3: TIMELINE REPLAY HEATMAP
+# -------------------------------------------------------------
+elif app_page == "⏰ Timeline Replay Heatmap":
+    render_timeline_heatmap_page()
+
+# -------------------------------------------------------------
+# PAGE 4: CROWD ESTIMATION CENTER
+# -------------------------------------------------------------
+elif app_page == "👥 Crowd Estimation Center":
+    render_crowd_estimation_page()
+
+# -------------------------------------------------------------
+# PAGE 4: POLICE ALERT DISPATCHER
+# -------------------------------------------------------------
+elif app_page == "🚨 Police Alert Dispatcher":
+    render_police_alerts_page()
+
+# -------------------------------------------------------------
+# PAGE 5: EMERGENCY CORRIDOR
+# -------------------------------------------------------------
+elif app_page == "🚑 Emergency Corridor":
+    render_emergency_corridor_page()
+
+# -------------------------------------------------------------
+# PAGE 6: FEEDBACK & RETRAINING TERMINAL
 # -------------------------------------------------------------
 elif app_page == "🤖 Feedback & Retraining Terminal":
     # Sidebar Model Status
