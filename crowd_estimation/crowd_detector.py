@@ -144,9 +144,10 @@ class CrowdDetector:
             "barricades_recommended": barricades_req
         }
 
-    def detect_image(self, image, confidence=0.25):
+    def detect_image(self, image, confidence=0.15):
         """
         Runs person detection on a PIL Image or numpy array.
+        Optimized for high-resolution CCTV footage to maximize recall on small/background pedestrians.
         Returns:
             annotated_image: PIL Image or numpy array with boxes drawn
             count: Number of persons detected
@@ -162,34 +163,91 @@ class CrowdDetector:
         else:
             cv_img = image.copy()
             
-        # Run inference
-        results = self.model.predict(cv_img, conf=confidence, classes=[0], verbose=False) # 0 is 'person' class in COCO
+        img_h, img_w, _ = cv_img.shape
         
-        # Draw bounding boxes and count
+        # Calculate optimal high-resolution imgsz (multiple of 32)
+        # We target 1024px to catch small objects in background, capped at the image size
+        imgsz = max(640, min(1024, max(img_h, img_w)))
+        imgsz = (imgsz // 32) * 32
+        
+        # Run inference with larger resolution and lower confidence threshold to capture background people
+        results = self.model.predict(
+            cv_img, 
+            conf=confidence, 
+            imgsz=imgsz, 
+            classes=[0], 
+            verbose=False
+        )
+        
         count = 0
         annotated_img = cv_img.copy()
         
         if len(results) > 0:
             boxes = results[0].boxes
+            candidate_boxes = []
+            candidate_scores = []
+            
             for box in boxes:
-                # Coordinates
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 conf = float(box.conf[0])
                 
-                # Draw box
-                cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                # Bounding box width/height
+                bw = x2 - x1
+                bh = y2 - y1
                 
-                # Label
-                label = f"person {conf:.2f}"
-                cv2.putText(annotated_img, label, (x1, max(y1 - 10, 15)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                count += 1
+                # Filter out microscopic noise boxes
+                if bw < 10 or bh < 10:
+                    continue
+                    
+                candidate_boxes.append([x1, y1, x2, y2])
+                candidate_scores.append(conf)
+                
+            # Apply NMS to remove duplicate/overlapping boxes resulting from low conf threshold
+            if len(candidate_boxes) > 0:
+                keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=0.45)
+                
+                for idx in keep:
+                    x1, y1, x2, y2 = candidate_boxes[idx]
+                    conf = candidate_scores[idx]
+                    
+                    # Draw box (red color for visual emphasis)
+                    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                    
+                    # Label with confidence
+                    label = f"person {conf:.2f}"
+                    cv2.putText(annotated_img, label, (x1, max(y1 - 6, 12)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+                    count += 1
                 
         # Convert back to RGB for PIL if needed
         if is_pil:
             return Image.fromarray(cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)), count
         else:
             return annotated_img, count
+
+    def _nms_numpy(self, boxes, scores, iou_threshold=0.45):
+        """Helper NMS method for deduplication."""
+        if len(boxes) == 0:
+            return []
+        boxes, scores = np.array(boxes), np.array(scores)
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        order = scores.argsort()[::-1]
+        
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            w, h = np.maximum(0.0, xx2 - xx1), np.maximum(0.0, yy2 - yy1)
+            inter = w * h
+            ovr = inter / (areas[i] + areas[order[1:]] - inter)
+            inds = np.where(ovr <= iou_threshold)[0]
+            order = order[inds + 1]
+        return keep
 
     def _simulate_image_detection(self, image):
         """Generates mock person detections when YOLOv8 is not available."""
