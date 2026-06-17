@@ -181,13 +181,13 @@ class CrowdDetector:
         # 2. Dynamic Settings Allocation
         # User can override confidence, but otherwise we set it adaptively
         if confidence is None:
-            if base_count < 15:
+            if base_count < 12:
                 # Sparse scene: e.g. pedestrian crossing, residential road
                 conf_thresh = 0.20
                 nms_iou = 0.40
                 min_box_size = 15
                 grid_size = 0  # No slicing needed
-            elif base_count < 50:
+            elif base_count < 30:
                 # Medium scene: busy intersection, market entrance
                 conf_thresh = 0.10
                 nms_iou = 0.45
@@ -195,8 +195,8 @@ class CrowdDetector:
                 grid_size = 2  # 2x2 grid
             else:
                 # Dense/Extreme scene: political rally, protest, stadium exit
-                conf_thresh = 0.03
-                nms_iou = 0.55
+                conf_thresh = 0.02
+                nms_iou = 0.60
                 min_box_size = 4
                 grid_size = 4  # 4x4 grid
         else:
