@@ -185,7 +185,7 @@ class CrowdDetector:
             for box in results_full[0].boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 conf = float(box.conf[0])
-                if (x2 - x1) >= 10 and (y2 - y1) >= 10:
+                if (x2 - x1) >= 4 and (y2 - y1) >= 4:
                     candidate_boxes.append([x1, y1, x2, y2])
                     candidate_scores.append(conf)
                     
@@ -222,7 +222,7 @@ class CrowdDetector:
                         gx1, gy1 = cx1 + sx1, cy1 + sy1
                         gx2, gy2 = cx2 + sx1, cy2 + sy1
                         
-                        if (gx2 - gx1) >= 10 and (gy2 - gy1) >= 10:
+                        if (gx2 - gx1) >= 4 and (gy2 - gy1) >= 4:
                             candidate_boxes.append([gx1, gy1, gx2, gy2])
                             candidate_scores.append(conf)
                             
