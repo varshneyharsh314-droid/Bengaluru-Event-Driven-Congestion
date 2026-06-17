@@ -191,16 +191,17 @@ class CrowdDetector:
                     
         # 2. Apply SAHI Slicing if image is sufficiently high resolution (>= 800px in either dimension)
         if img_w >= 800 or img_h >= 800:
-            # Slices are 55% of width/height to ensure 10% overlap
-            slice_w = int(img_w * 0.55)
-            slice_h = int(img_h * 0.55)
+            # Denser 3x3 Slicing Grid (9 overlapping patches)
+            slice_w = int(img_w * 0.40)
+            slice_h = int(img_h * 0.40)
             
-            slices = [
-                (0, 0, slice_w, slice_h),                  # Top-Left
-                (img_w - slice_w, 0, img_w, slice_h),      # Top-Right
-                (0, img_h - slice_h, slice_w, img_h),      # Bottom-Left
-                (img_w - slice_w, img_h - slice_h, img_w, img_h)  # Bottom-Right
-            ]
+            x_coords = [0, int(img_w * 0.30), img_w - slice_w]
+            y_coords = [0, int(img_h * 0.30), img_h - slice_h]
+            
+            slices = []
+            for yc in y_coords:
+                for xc in x_coords:
+                    slices.append((xc, yc, xc + slice_w, yc + slice_h))
             
             for sx1, sy1, sx2, sy2 in slices:
                 crop = cv_img[sy1:sy2, sx1:sx2]
