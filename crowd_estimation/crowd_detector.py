@@ -16,7 +16,7 @@ class CrowdDetector:
     Handles YOLOv8 model loading, inference on images/videos,
     crowd density categorization, and resource optimization updates.
     """
-    def __init__(self, model_name="yolov8n.pt"):
+    def __init__(self, model_name="yolov8m.pt"):
         self.model_name = model_name
         self.model = None
         self.load_model()
@@ -144,10 +144,11 @@ class CrowdDetector:
             "barricades_recommended": barricades_req
         }
 
-    def detect_image(self, image, confidence=0.15):
+    def detect_image(self, image, confidence=0.05):
         """
         Runs person detection on a PIL Image or numpy array.
-        Optimized for high-resolution CCTV footage to maximize recall on small/background pedestrians.
+        Implements Slicing Aided Hyper Inference (SAHI) for high-resolution images
+        to maximize recall on extremely dense or distant crowd clusters.
         Returns:
             annotated_image: PIL Image or numpy array with boxes drawn
             count: Number of persons detected
@@ -165,59 +166,90 @@ class CrowdDetector:
             
         img_h, img_w, _ = cv_img.shape
         
-        # Calculate optimal high-resolution imgsz (multiple of 32)
-        # We target 1024px to catch small objects in background, capped at the image size
-        imgsz = max(640, min(1024, max(img_h, img_w)))
-        imgsz = (imgsz // 32) * 32
+        candidate_boxes = []
+        candidate_scores = []
         
-        # Run inference with larger resolution and lower confidence threshold to capture background people
-        results = self.model.predict(
+        # 1. Run Base Full-Frame Inference
+        base_imgsz = max(640, min(1280, max(img_h, img_w)))
+        base_imgsz = (base_imgsz // 32) * 32
+        
+        results_full = self.model.predict(
             cv_img, 
             conf=confidence, 
-            imgsz=imgsz, 
+            imgsz=base_imgsz, 
             classes=[0], 
             verbose=False
         )
         
+        if len(results_full) > 0:
+            for box in results_full[0].boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                conf = float(box.conf[0])
+                if (x2 - x1) >= 10 and (y2 - y1) >= 10:
+                    candidate_boxes.append([x1, y1, x2, y2])
+                    candidate_scores.append(conf)
+                    
+        # 2. Apply SAHI Slicing if image is sufficiently high resolution (>= 800px in either dimension)
+        if img_w >= 800 or img_h >= 800:
+            # Slices are 55% of width/height to ensure 10% overlap
+            slice_w = int(img_w * 0.55)
+            slice_h = int(img_h * 0.55)
+            
+            slices = [
+                (0, 0, slice_w, slice_h),                  # Top-Left
+                (img_w - slice_w, 0, img_w, slice_h),      # Top-Right
+                (0, img_h - slice_h, slice_w, img_h),      # Bottom-Left
+                (img_w - slice_w, img_h - slice_h, img_w, img_h)  # Bottom-Right
+            ]
+            
+            for sx1, sy1, sx2, sy2 in slices:
+                crop = cv_img[sy1:sy2, sx1:sx2]
+                res_crop = self.model.predict(
+                    crop, 
+                    conf=confidence, 
+                    imgsz=800, 
+                    classes=[0], 
+                    verbose=False
+                )
+                
+                if len(res_crop) > 0:
+                    for box in res_crop[0].boxes:
+                        cx1, cy1, cx2, cy2 = map(int, box.xyxy[0].tolist())
+                        conf = float(box.conf[0])
+                        
+                        # Translate slice boxes to global coordinates
+                        gx1, gy1 = cx1 + sx1, cy1 + sy1
+                        gx2, gy2 = cx2 + sx1, cy2 + sy1
+                        
+                        if (gx2 - gx1) >= 10 and (gy2 - gy1) >= 10:
+                            candidate_boxes.append([gx1, gy1, gx2, gy2])
+                            candidate_scores.append(conf)
+                            
+        # 3. Apply Global NMS to prune duplicate detections in slice overlap zones
         count = 0
         annotated_img = cv_img.copy()
         
-        if len(results) > 0:
-            boxes = results[0].boxes
-            candidate_boxes = []
-            candidate_scores = []
+        if len(candidate_boxes) > 0:
+            keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=0.35)
             
-            for box in boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                conf = float(box.conf[0])
+            for idx in keep:
+                x1, y1, x2, y2 = candidate_boxes[idx]
+                conf = candidate_scores[idx]
                 
-                # Bounding box width/height
-                bw = x2 - x1
-                bh = y2 - y1
+                # Draw box
+                cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 
-                # Filter out microscopic noise boxes
-                if bw < 10 or bh < 10:
-                    continue
-                    
-                candidate_boxes.append([x1, y1, x2, y2])
-                candidate_scores.append(conf)
+                # Label with confidence
+                label = f"person {conf:.2f}"
+                cv2.putText(annotated_img, label, (x1, max(y1 - 6, 12)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+                count += 1
                 
-            # Apply NMS to remove duplicate/overlapping boxes resulting from low conf threshold
-            if len(candidate_boxes) > 0:
-                keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=0.45)
-                
-                for idx in keep:
-                    x1, y1, x2, y2 = candidate_boxes[idx]
-                    conf = candidate_scores[idx]
-                    
-                    # Draw box (red color for visual emphasis)
-                    cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                    
-                    # Label with confidence
-                    label = f"person {conf:.2f}"
-                    cv2.putText(annotated_img, label, (x1, max(y1 - 6, 12)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-                    count += 1
+        # Convert back to RGB for PIL if needed
+        if is_pil:
+            return Image.fromarray(cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)), count
+        else:
+            return annotated_img, count
                 
         # Convert back to RGB for PIL if needed
         if is_pil:
