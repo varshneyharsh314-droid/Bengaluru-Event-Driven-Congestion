@@ -33,13 +33,16 @@ class CrowdService:
     def load_model(self):
         try:
             from ultralytics import YOLO
-            # Find the model in the workspace - prioritize yolov8m.pt for high accuracy crowd counting
+            import torch
+            
+            # Prioritize YOLOv8m (Medium) for maximum detection accuracy and recall in dense crowds,
+            # falling back to YOLOv8n (Nano) if YOLOv8m is not found.
             paths_to_check = [
                 os.path.join(os.path.dirname(__file__), "..", "..", "..", "yolov8m.pt"),
                 os.path.join(os.path.dirname(__file__), "..", "..", "yolov8m.pt"),
-                settings.YOLO_MODEL_PATH,
-                os.path.join(os.path.dirname(__file__), "..", "..", "yolov8n.pt"),
                 os.path.join(os.path.dirname(__file__), "..", "..", "..", "yolov8n.pt"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "yolov8n.pt"),
+                settings.YOLO_MODEL_PATH,
             ]
             
             selected_path = None
@@ -54,9 +57,9 @@ class CrowdService:
                 print(f"YOLOv8 successfully loaded from: {selected_path}")
             else:
                 # Attempt default load (will download)
-                self.model = YOLO("yolov8m.pt")
+                self.model = YOLO("yolov8n.pt")
                 self.yolo_available = True
-                print("YOLOv8 initialized with default yolov8m.pt")
+                print("YOLOv8 initialized with default yolov8n.pt")
         except Exception as e:
             print(f"Warning: Failed to load YOLOv8 model: {e}. Running in simulation mode.")
             self.model = None
@@ -158,58 +161,53 @@ class CrowdService:
             
         img_h, img_w, _ = img.shape
         
-        # Fast first pass to estimate baseline density of both people and vehicles
-        first_pass_res = self.model.predict(img, conf=0.05, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
-        base_count = len(first_pass_res[0].boxes) if len(first_pass_res) > 0 else 0
+        # Run exactly ONE full-frame pass at 640px with a low confidence threshold (0.015)
+        # to capture all potential candidates in a single forward pass.
+        yolo_conf = 0.015 if confidence is None else min(0.015, confidence)
+        results = self.model.predict(img, conf=yolo_conf, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
+        boxes_list = results[0].boxes if len(results) > 0 else []
         
-        # Adaptive thresholds and slicing grid - high-sensitivity for dense crowd counting
+        # Count detections with confidence >= 0.05 to measure basic scene density
+        base_count = sum(1 for b in boxes_list if float(b.conf[0]) >= 0.05)
+        
+        # Determine adaptive parameters based on base_count
         if confidence is None:
-            if base_count < 5:
-                conf_thresh = 0.20
+            if base_count < 30:
+                conf_thresh = 0.15
                 nms_iou = 0.40
-                min_box_size = 12
+                min_box_size = 10
                 grid_size = 0
-            elif base_count < 15:
-                conf_thresh = 0.08
+            elif base_count < 100:
+                conf_thresh = 0.06
                 nms_iou = 0.50
-                min_box_size = 8
+                min_box_size = 6
                 grid_size = 2
-            elif base_count < 40:
-                conf_thresh = 0.03
-                nms_iou = 0.60
-                min_box_size = 4
-                grid_size = 3
             else:
-                conf_thresh = 0.015
-                nms_iou = 0.68
+                conf_thresh = 0.02
+                nms_iou = 0.60
                 min_box_size = 3
-                grid_size = 4
+                grid_size = 3
         else:
             conf_thresh = confidence
             nms_iou = 0.50
             min_box_size = 6
-            grid_size = 4
+            grid_size = 2 if base_count >= 30 else 0
             
         candidate_boxes = []
         candidate_scores = []
         candidate_classes = []
         
-        # Full frame base resolution run
-        base_imgsz = max(640, min(1280, max(img_h, img_w)))
-        base_imgsz = (base_imgsz // 32) * 32
-        
-        results_full = self.model.predict(img, conf=conf_thresh, imgsz=base_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
-        if len(results_full) > 0:
-            for box in results_full[0].boxes:
+        # Filter the full frame detections in Python (avoiding a second full-frame pass)
+        for box in boxes_list:
+            det_conf = float(box.conf[0])
+            if det_conf >= conf_thresh:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                det_conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
                 if (x2 - x1) >= min_box_size and (y2 - y1) >= min_box_size:
                     candidate_boxes.append([x1, y1, x2, y2])
                     candidate_scores.append(det_conf)
-                    candidate_classes.append(cls_id)
+                    candidate_classes.append(int(box.cls[0]))
                     
-        # Apply SAHI slicing
+        # Apply SAHI slicing with optimized crop image size (640px)
         if grid_size > 0 and (img_w >= 600 or img_h >= 600):
             if grid_size == 2:
                 slice_w = int(img_w * 0.55)
@@ -220,21 +218,14 @@ class CrowdService:
                     (0, img_h - slice_h, slice_w, img_h),
                     (img_w - slice_w, img_h - slice_h, img_w, img_h)
                 ]
-                crop_imgsz = 800
-            elif grid_size == 3:
+                crop_imgsz = 640
+            else: # grid_size == 3
                 slice_w = int(img_w * 0.40)
                 slice_h = int(img_h * 0.40)
                 x_coords = [0, int(img_w * 0.30), img_w - slice_w]
                 y_coords = [0, int(img_h * 0.30), img_h - slice_h]
                 slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
-                crop_imgsz = 800
-            else: # grid_size == 4
-                slice_w = int(img_w * 0.30)
-                slice_h = int(img_h * 0.30)
-                x_coords = [0, int(img_w * 0.23), int(img_w * 0.46), img_w - slice_w]
-                y_coords = [0, int(img_h * 0.23), int(img_h * 0.46), img_h - slice_h]
-                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
-                crop_imgsz = 1024
+                crop_imgsz = 640
                 
             for sx1, sy1, sx2, sy2 in slices:
                 crop = img[sy1:sy2, sx1:sx2]
@@ -351,7 +342,8 @@ class CrowdService:
 
     def process_video_frames(self, video_path: str, sample_every: int = -1,
                              confidence: float = None, min_box_size: int = 8,
-                             pace_fps: bool = False, render_frames: bool = True):
+                             pace_fps: bool = False, render_frames: bool = True,
+                             use_slicing: bool = True):
         """
         Generator that processes a video file frame-by-frame with YOLO person detection.
         Yields per-frame results for real-time streaming.
@@ -400,7 +392,7 @@ class CrowdService:
                 if self.yolo_available and self.model is not None:
                     # Run YOLO detection on this frame
                     annotated_frame, headcount, last_boxes = self._detect_single_frame(
-                        frame, confidence=confidence, min_box_size=min_box_size
+                        frame, confidence=confidence, min_box_size=min_box_size, use_slicing=use_slicing
                     )
                 else:
                     # Simulation fallback
@@ -418,16 +410,19 @@ class CrowdService:
             if render_frames:
                 # Downscale the output frame for highly optimized and smooth WebSocket transmission
                 # preserving the aspect ratio. Target width is 640px.
-                max_width = 640
-                if width > max_width:
-                    scale = max_width / width
-                    target_height = int(height * scale)
-                    web_frame = cv2.resize(annotated_frame, (max_width, target_height), interpolation=cv2.INTER_AREA)
-                else:
-                    web_frame = annotated_frame
+                # Only encode new frame if it's a sample frame, otherwise use the last encoded frame bytes
+                # to save CPU encoding/resizing overhead.
+                if is_sample_frame or last_annotated_bytes is None:
+                    max_width = 640
+                    if width > max_width:
+                        scale = max_width / width
+                        target_height = int(height * scale)
+                        web_frame = cv2.resize(annotated_frame, (max_width, target_height), interpolation=cv2.INTER_AREA)
+                    else:
+                        web_frame = annotated_frame
 
-                _, encoded = cv2.imencode('.jpg', web_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                last_annotated_bytes = encoded.tobytes()
+                    _, encoded = cv2.imencode('.jpg', web_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    last_annotated_bytes = encoded.tobytes()
             else:
                 last_annotated_bytes = None
 
@@ -480,7 +475,7 @@ class CrowdService:
         }
 
     def process_video_complete(self, video_path: str, sample_every: int = 3,
-                               confidence: float = None) -> dict:
+                               confidence: float = None, use_slicing: bool = True) -> dict:
         """
         Non-streaming wrapper: processes entire video and returns summary + annotated frames.
         """
@@ -489,7 +484,8 @@ class CrowdService:
         per_frame_counts = []
 
         for result in self.process_video_frames(video_path, sample_every=sample_every,
-                                                confidence=confidence, render_frames=False):
+                                                confidence=confidence, render_frames=False,
+                                                use_slicing=use_slicing):
             if result["is_last"]:
                 summary = result.get("summary", {})
             else:
@@ -513,68 +509,69 @@ class CrowdService:
 
         return summary
 
-    def _detect_single_frame(self, frame, confidence: float = None, min_box_size: int = 8):
+    def _detect_single_frame(self, frame, confidence: float = None, min_box_size: int = 8, use_slicing: bool = True):
         """
         Runs YOLO person and vehicle detection on a single video frame. Optimized for real-time
-        performance by running a single high-resolution inference with adaptive thresholds,
-        or employing a 3x3 slicing grid (SAHI) for dense crowds to ensure small objects are not missed.
+        performance. Always uses the standard 640px image size to enable caching of tensor layouts
+        and runs exactly one pass (plus optional adaptive slicing slices if use_slicing is enabled)
+        with adaptive thresholding performed in Python.
         Returns (annotated_frame, headcount, detected_boxes).
         """
         img_h, img_w = frame.shape[:2]
         
-        # 1. First pass at 640px to assess basic density (both people and vehicles)
-        first_pass_res = self.model.predict(frame, conf=0.05, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
-        base_count = len(first_pass_res[0].boxes) if len(first_pass_res) > 0 else 0
+        # Run exactly ONE YOLO pass at 640px. Use low confidence (0.02) to capture all potential
+        # candidates for adaptive post-filtering in Python.
+        yolo_conf = 0.02 if confidence is None else confidence
+        results = self.model.predict(frame, conf=yolo_conf, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
+        boxes_list = results[0].boxes if len(results) > 0 else []
         
-        # 2. Adaptive thresholding and slicing grid choice based on estimated density
+        # Count detections with confidence >= 0.05 to measure basic scene density
+        base_count = sum(1 for b in boxes_list if float(b.conf[0]) >= 0.05)
+        
+        # Adaptive thresholding and parameters determined on-the-fly in Python
         if confidence is None:
-            if base_count < 5:
+            if base_count < 8:
                 conf_thresh = 0.15
                 mbs = 10
                 nms_iou = 0.40
                 grid_size = 0
-            elif base_count < 15:
+            elif base_count < 25:
                 conf_thresh = 0.08
                 mbs = 6
                 nms_iou = 0.50
-                grid_size = 2
-            elif base_count < 40:
-                conf_thresh = 0.03
+                grid_size = 2 if use_slicing else 0
+            elif base_count < 60:
+                conf_thresh = 0.04
                 mbs = 4
                 nms_iou = 0.60
-                grid_size = 3
+                grid_size = 2 if use_slicing else 0
             else:
-                conf_thresh = 0.015
+                conf_thresh = 0.02
                 mbs = 3
-                nms_iou = 0.68
-                grid_size = 4  # 4x4 slicing grid for dense crowds
+                nms_iou = 0.65
+                grid_size = 3 if use_slicing else 0
         else:
             conf_thresh = confidence
             mbs = min_box_size
             nms_iou = 0.50
-            grid_size = 4 if base_count >= 40 else (3 if base_count >= 15 else (2 if base_count >= 5 else 0))
+            grid_size = 2 if (use_slicing and base_count >= 25) else 0
             
         candidate_boxes = []
         candidate_scores = []
         candidate_classes = []
         
-        # 3. Base full-frame inference run
-        base_imgsz = max(640, min(1280, max(img_h, img_w)))
-        base_imgsz = (base_imgsz // 32) * 32
-        
-        results_full = self.model.predict(frame, conf=conf_thresh, imgsz=base_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
-        if len(results_full) > 0:
-            for box in results_full[0].boxes:
+        # Filter candidate boxes in Python (extremely fast, <0.1ms overhead)
+        for box in boxes_list:
+            det_conf = float(box.conf[0])
+            if det_conf >= conf_thresh:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                det_conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
                 if (x2 - x1) >= mbs and (y2 - y1) >= mbs:
                     candidate_boxes.append([x1, y1, x2, y2])
                     candidate_scores.append(det_conf)
-                    candidate_classes.append(cls_id)
+                    candidate_classes.append(int(box.cls[0]))
                     
-        # 4. Apply SAHI slicing for video frame if grid_size > 0
-        if grid_size > 0 and (img_w >= 600 or img_h >= 600):
+        # Apply SAHI slicing with optimized crop image size (640px)
+        if use_slicing and grid_size > 0 and (img_w >= 600 or img_h >= 600):
             if grid_size == 2:
                 slice_w = int(img_w * 0.55)
                 slice_h = int(img_h * 0.55)
@@ -584,21 +581,14 @@ class CrowdService:
                     (0, img_h - slice_h, slice_w, img_h),
                     (img_w - slice_w, img_h - slice_h, img_w, img_h)
                 ]
-                crop_imgsz = 800
-            elif grid_size == 3:
+                crop_imgsz = 640
+            else: # grid_size == 3
                 slice_w = int(img_w * 0.40)
                 slice_h = int(img_h * 0.40)
                 x_coords = [0, int(img_w * 0.30), img_w - slice_w]
                 y_coords = [0, int(img_h * 0.30), img_h - slice_h]
                 slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
-                crop_imgsz = 800
-            else: # grid_size == 4
-                slice_w = int(img_w * 0.30)
-                slice_h = int(img_h * 0.30)
-                x_coords = [0, int(img_w * 0.23), int(img_w * 0.46), img_w - slice_w]
-                y_coords = [0, int(img_h * 0.23), int(img_h * 0.46), img_h - slice_h]
-                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
-                crop_imgsz = 1024
+                crop_imgsz = 640
                 
             for sx1, sy1, sx2, sy2 in slices:
                 crop = frame[sy1:sy2, sx1:sx2]
@@ -615,7 +605,7 @@ class CrowdService:
                             candidate_scores.append(det_conf)
                             candidate_classes.append(cls_id)
                             
-        # 5. Global NMS Deduplication
+        # Global NMS Deduplication
         count = 0
         annotated = frame.copy()
         detected_boxes = []
@@ -645,7 +635,7 @@ class CrowdService:
         cv2.rectangle(annotated, (10, 10), (360, 50), (15, 23, 42), -1)
         cv2.putText(annotated, f"OBJECTS DETECTED: {count} | SURVEILLANCE ACTIVE",
                     (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
-
+ 
         return annotated, count, detected_boxes
 
     def _draw_cached_boxes(self, frame, boxes):
