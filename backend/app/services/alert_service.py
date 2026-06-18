@@ -94,18 +94,18 @@ class AlertService:
     @staticmethod
     def generate_alert_message(data: dict) -> str:
         """
-        Creates structured SMS text.
+        Creates a compact structured SMS text suitable for GSM-7 (under 160 chars).
         """
+        # Truncate location name if too long to save characters
+        loc = data['location_name']
+        if len(loc) > 25:
+            loc = loc[:22] + "..."
+            
         alert_text = (
-            f"🚨 BENGALURU TRAFFIC POLICE CONTROL ROOM ALERT\n"
-            f"Event Type: {data['event_type'].upper()}\n"
-            f"Priority: {data['priority'].upper()}\n"
-            f"Congestion: {data['congestion'].upper()}\n"
-            f"Expected Delay: {data['expected_delay']} mins\n"
-            f"Police Force Needed: {data['police_needed']} officers\n"
-            f"Barricades: {data['barricades']} units\n"
-            f"Location: {data['location_name']} ({data['latitude']:.5f}, {data['longitude']:.5f})\n"
-            f"ACTION: Immediate dispatch to incident junction required."
+            f"BTP CTRL ALERT: {data['event_type'].upper()} at {loc} "
+            f"({data['latitude']:.4f}, {data['longitude']:.4f}). "
+            f"Congestion: {data['congestion'].upper()}, Delay: {data['expected_delay']}m. "
+            f"Police: {data['police_needed']}, Barricades: {data['barricades']}. Dispatch needed."
         )
         return alert_text
 
