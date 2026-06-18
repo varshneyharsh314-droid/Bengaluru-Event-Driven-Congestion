@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     YOLO_MODEL_PATH: str = os.path.join(MODEL_DIR, "yolov8n.pt")
     POLICE_STATION_CSV: str = os.path.join(MODEL_DIR, "police_station.csv")
 
+    # Twilio SMS Configs
+    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "AC3c68d9f33472fe976a39c356fc1a8767")
+    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "b48b39ca3f9a6c7e8886f14920f10f29")
+    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "+19843676327")
+    TWILIO_RECIPIENT: str = os.getenv("TWILIO_RECIPIENT", "+918709161536")
+
     class Config:
         case_sensitive = True
 

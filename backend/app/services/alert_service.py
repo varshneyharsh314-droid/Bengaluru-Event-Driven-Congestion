@@ -112,11 +112,51 @@ class AlertService:
     @staticmethod
     def simulate_sms_dispatch(phone_number: str, message: str) -> dict:
         """
-        Simulates Twilio/SMS API transmission.
+        Transmits actual SMS using Twilio if credentials are set, otherwise falls back to simulation.
         """
-        # Small sleep to mock API call latency
-        time.sleep(0.15)
+        # If Twilio settings are configured, try to send a real SMS
+        if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
+            try:
+                from twilio.rest import Client
+                client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                
+                # To bypass Twilio trial verification limitation and deliver to the user's actual phone
+                target_phone = settings.TWILIO_RECIPIENT if settings.TWILIO_RECIPIENT else phone_number
+                
+                # Twilio requires clean number format
+                clean_target = "".join(c for c in target_phone if c.isdigit() or c == '+')
+                clean_from = "".join(c for c in settings.TWILIO_PHONE_NUMBER if c.isdigit() or c == '+')
+                
+                print(f"Sending real SMS from {clean_from} to {clean_target}...")
+                
+                msg = client.messages.create(
+                    body=message,
+                    from_=clean_from,
+                    to=clean_target
+                )
+                
+                return {
+                    "status": "SENT",
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "recipient_phone": target_phone,
+                    "gateway_message_id": msg.sid,
+                    "characters_sent": len(message),
+                    "payload": message
+                }
+            except Exception as e:
+                print(f"Twilio actual SMS delivery failed: {e}")
+                # Return failure log
+                return {
+                    "status": "FAILED",
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "recipient_phone": phone_number,
+                    "gateway_message_id": f"ERROR-{int(time.time())}",
+                    "characters_sent": len(message),
+                    "payload": f"Error: {str(e)}"
+                }
         
+        # Fallback simulation
+        time.sleep(0.15)
         return {
             "status": "SENT",
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
