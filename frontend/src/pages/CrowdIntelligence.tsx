@@ -107,8 +107,41 @@ export default function CrowdIntelligence() {
     ws: WebSocket | null;
   }
 
-  const [junctionList, setJunctionList] = useState<any[]>([]);
-  const [edgesList, setEdgesList] = useState<any[]>([]);
+  const [junctionList, setJunctionList] = useState<any[]>([
+    { name: 'SilkBoardJunc', lat: 12.9176, lon: 77.6246 },
+    { name: 'HSRLayout14thMain', lat: 12.9172, lon: 77.6366 },
+    { name: 'AgaraJunction', lat: 12.9261, lon: 77.6508 },
+    { name: 'IbblurJunction', lat: 12.9234, lon: 77.6712 },
+    { name: 'BellandurJunction', lat: 12.9366, lon: 77.6830 },
+    { name: 'MadiwalaCheckpost', lat: 12.9225, lon: 77.6189 },
+    { name: 'KoramangalaWaterTank', lat: 12.9348, lon: 77.6210 },
+    { name: 'BTMLayout16thMain', lat: 12.9142, lon: 77.6080 },
+    { name: 'HSRLayout27thMain', lat: 12.9110, lon: 77.6475 },
+  ]);
+  const [edgesList, setEdgesList] = useState<any[]>([
+    { source: 'SilkBoardJunc', target: 'HSRLayout14thMain', weight: 4.0, length: 1.5, base_weight: 4.0 },
+    { source: 'HSRLayout14thMain', target: 'SilkBoardJunc', weight: 4.0, length: 1.5, base_weight: 4.0 },
+    { source: 'HSRLayout14thMain', target: 'AgaraJunction', weight: 3.5, length: 1.3, base_weight: 3.5 },
+    { source: 'AgaraJunction', target: 'HSRLayout14thMain', weight: 3.5, length: 1.3, base_weight: 3.5 },
+    { source: 'AgaraJunction', target: 'IbblurJunction', weight: 5.0, length: 2.1, base_weight: 5.0 },
+    { source: 'IbblurJunction', target: 'AgaraJunction', weight: 5.0, length: 2.1, base_weight: 5.0 },
+    { source: 'SilkBoardJunc', target: 'MadiwalaCheckpost', weight: 3.0, length: 1.1, base_weight: 3.0 },
+    { source: 'MadiwalaCheckpost', target: 'SilkBoardJunc', weight: 3.0, length: 1.1, base_weight: 3.0 },
+    { source: 'MadiwalaCheckpost', target: 'KoramangalaWaterTank', weight: 4.5, length: 1.8, base_weight: 4.5 },
+    { source: 'KoramangalaWaterTank', target: 'MadiwalaCheckpost', weight: 4.5, length: 1.8, base_weight: 4.5 },
+    { source: 'KoramangalaWaterTank', target: 'AgaraJunction', weight: 6.0, length: 2.4, base_weight: 6.0 },
+    { source: 'AgaraJunction', target: 'KoramangalaWaterTank', weight: 6.0, length: 2.4, base_weight: 6.0 },
+    { source: 'SilkBoardJunc', target: 'BTMLayout16thMain', weight: 3.5, length: 1.4, base_weight: 3.5 },
+    { source: 'BTMLayout16thMain', target: 'SilkBoardJunc', weight: 3.5, length: 1.4, base_weight: 3.5 },
+    { source: 'BTMLayout16thMain', target: 'KoramangalaWaterTank', weight: 5.5, length: 2.0, base_weight: 5.5 },
+    { source: 'KoramangalaWaterTank', target: 'BTMLayout16thMain', weight: 5.5, length: 2.0, base_weight: 5.5 },
+    { source: 'IbblurJunction', target: 'BellandurJunction', weight: 4.0, length: 1.6, base_weight: 4.0 },
+    { source: 'BellandurJunction', target: 'IbblurJunction', weight: 4.0, length: 1.6, base_weight: 4.0 },
+    { source: 'AgaraJunction', target: 'HSRLayout27thMain', weight: 3.0, length: 1.2, base_weight: 3.0 },
+    { source: 'HSRLayout27thMain', target: 'AgaraJunction', weight: 3.0, length: 1.2, base_weight: 3.0 },
+    { source: 'HSRLayout27thMain', target: 'IbblurJunction', weight: 3.0, length: 1.1, base_weight: 3.0 },
+    { source: 'IbblurJunction', target: 'HSRLayout27thMain', weight: 3.0, length: 1.1, base_weight: 3.0 },
+  ]);
   const [simSource, setSimSource] = useState('SilkBoardJunc');
   const [simTarget, setSimTarget] = useState('AgaraJunction');
   const [simAlgorithm, setSimAlgorithm] = useState('astar');
