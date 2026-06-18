@@ -573,8 +573,8 @@ export default function CrowdIntelligence() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-black tracking-tight">CCTV CROWD INTELLIGENCE</h1>
-        <p className="text-sm text-slate-400">Process live camera frames or video files using YOLOv8 with SAHI slicing grid calibration for real-time headcount analysis.</p>
+        <h1 className="text-3xl font-black tracking-tight">CCTV TRAFFIC & CROWD INTELLIGENCE</h1>
+        <p className="text-sm text-slate-400">Process live camera frames or video files using YOLOv8 with SAHI slicing grid calibration for real-time traffic and crowd analysis.</p>
       </div>
 
       {/* Mode Tabs */}
@@ -860,7 +860,7 @@ export default function CrowdIntelligence() {
                 {loading ? (
                   <RefreshCw className="w-4.5 h-4.5 animate-spin" />
                 ) : (
-                  <span>{mode === 'image' ? 'Start SAHI Calibration' : 'Start Video Headcount'}</span>
+                  <span>{mode === 'image' ? 'Start SAHI Calibration' : 'Start Video Analysis'}</span>
                 )}
               </button>
             </form>
@@ -1022,7 +1022,7 @@ export default function CrowdIntelligence() {
                             cam.headcount > 10 ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/15' :
                             'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
                           }`}>
-                            {cam.headcount} people detected
+                            {cam.headcount} objects detected
                           </span>
                         </div>
 
@@ -1100,7 +1100,7 @@ export default function CrowdIntelligence() {
                               <div className="space-y-1">
                                 <div className="flex justify-between text-[8px] text-slate-400 font-bold">
                                   <span>Manual Density Slider</span>
-                                  <span>{cam.headcount} persons</span>
+                                  <span>{cam.headcount} objects</span>
                                 </div>
                                 <input 
                                   type="range"
@@ -1204,13 +1204,13 @@ export default function CrowdIntelligence() {
                 <div className="grid grid-cols-3 gap-4">
                   {/* Live Headcount */}
                   <div className="glass-panel p-5 rounded-xl border border-slate-800 text-center">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Live Headcount</span>
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Live Detections Count</span>
                     <span className={`text-4xl font-black transition-all duration-200 ${
                       videoStream.headcount > 30 ? 'text-police-red' : videoStream.headcount > 10 ? 'text-amber-400' : 'text-emerald-400'
                     }`}>
                       {videoStream.headcount}
                     </span>
-                    <span className="block text-[10px] text-slate-500 mt-1">persons detected</span>
+                    <span className="block text-[10px] text-slate-500 mt-1">objects detected</span>
                   </div>
 
                   {/* Peak Count */}
@@ -1262,15 +1262,15 @@ export default function CrowdIntelligence() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
                       <div>
-                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Average Headcount</span>
-                        <span className="text-2xl font-black text-slate-200">{videoStream.summary.average_headcount} people</span>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Average Objects Count</span>
+                        <span className="text-2xl font-black text-slate-200">{videoStream.summary.average_headcount} objects</span>
                       </div>
                       <Users className="w-6 h-6 text-police-gold opacity-55" />
                     </div>
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
                       <div>
-                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Peak Headcount</span>
-                        <span className="text-2xl font-black text-police-red">{videoStream.summary.peak_headcount} people</span>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Peak Objects Count</span>
+                        <span className="text-2xl font-black text-police-red">{videoStream.summary.peak_headcount} objects</span>
                       </div>
                       <AlertTriangle className="w-6 h-6 text-police-red opacity-55" />
                     </div>
@@ -1335,8 +1335,8 @@ export default function CrowdIntelligence() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
                       <div>
-                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Body Count</span>
-                        <span className="text-2xl font-black text-slate-200">{result.crowd_count} people</span>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Traffic & Crowd Count</span>
+                        <span className="text-2xl font-black text-slate-200">{result.crowd_count} objects</span>
                       </div>
                       <Users className="w-6 h-6 text-police-gold opacity-55" />
                     </div>

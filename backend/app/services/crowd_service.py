@@ -15,6 +15,15 @@ try:
 except Exception as e:
     print(f"Torch load monkey patch warning: {e}")
 
+CLASS_MAP = {
+    0: {"name": "Person", "color": (0, 0, 255)},        # BGR Red
+    1: {"name": "Bicycle", "color": (255, 0, 0)},       # BGR Blue
+    2: {"name": "Car", "color": (0, 215, 255)},         # BGR Gold/Amber
+    3: {"name": "Motorcycle", "color": (255, 0, 0)},    # BGR Blue
+    5: {"name": "Bus", "color": (0, 215, 255)},         # BGR Gold/Amber
+    7: {"name": "Truck", "color": (0, 215, 255)}        # BGR Gold/Amber
+}
+
 class CrowdService:
     def __init__(self):
         self.model = None
@@ -149,8 +158,8 @@ class CrowdService:
             
         img_h, img_w, _ = img.shape
         
-        # Fast first pass to estimate baseline density
-        first_pass_res = self.model.predict(img, conf=0.15, imgsz=640, classes=[0], verbose=False)
+        # Fast first pass to estimate baseline density of both people and vehicles
+        first_pass_res = self.model.predict(img, conf=0.15, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
         base_count = len(first_pass_res[0].boxes) if len(first_pass_res) > 0 else 0
         
         # Adaptive thresholds and slicing grid - high-sensitivity for dense crowd counting
@@ -178,19 +187,22 @@ class CrowdService:
             
         candidate_boxes = []
         candidate_scores = []
+        candidate_classes = []
         
         # Full frame base resolution run
         base_imgsz = max(640, min(1280, max(img_h, img_w)))
         base_imgsz = (base_imgsz // 32) * 32
         
-        results_full = self.model.predict(img, conf=conf_thresh, imgsz=base_imgsz, classes=[0], verbose=False)
+        results_full = self.model.predict(img, conf=conf_thresh, imgsz=base_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
         if len(results_full) > 0:
             for box in results_full[0].boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 det_conf = float(box.conf[0])
+                cls_id = int(box.cls[0])
                 if (x2 - x1) >= min_box_size and (y2 - y1) >= min_box_size:
                     candidate_boxes.append([x1, y1, x2, y2])
                     candidate_scores.append(det_conf)
+                    candidate_classes.append(cls_id)
                     
         # Apply SAHI slicing
         if grid_size > 0 and (img_w >= 600 or img_h >= 600):
@@ -214,16 +226,18 @@ class CrowdService:
                 
             for sx1, sy1, sx2, sy2 in slices:
                 crop = img[sy1:sy2, sx1:sx2]
-                res_crop = self.model.predict(crop, conf=conf_thresh, imgsz=crop_imgsz, classes=[0], verbose=False)
+                res_crop = self.model.predict(crop, conf=conf_thresh, imgsz=crop_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
                 if len(res_crop) > 0:
                     for box in res_crop[0].boxes:
                         cx1, cy1, cx2, cy2 = map(int, box.xyxy[0].tolist())
                         det_conf = float(box.conf[0])
+                        cls_id = int(box.cls[0])
                         gx1, gy1 = cx1 + sx1, cy1 + sy1
                         gx2, gy2 = cx2 + sx1, cy2 + sy1
                         if (gx2 - gx1) >= min_box_size and (gy2 - gy1) >= min_box_size:
                             candidate_boxes.append([gx1, gy1, gx2, gy2])
                             candidate_scores.append(det_conf)
+                            candidate_classes.append(cls_id)
                             
         # NMS Deduplication
         count = 0
@@ -233,12 +247,17 @@ class CrowdService:
             for idx in keep:
                 x1, y1, x2, y2 = candidate_boxes[idx]
                 det_conf = candidate_scores[idx]
-                # Red bounding box for verified person detection
-                cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                # Add "VERIFIED" label with confidence score
-                label = f"VERIFIED ({det_conf:.2f})"
+                cls_id = candidate_classes[idx]
+                
+                meta = CLASS_MAP.get(cls_id, {"name": "Object", "color": (0, 255, 0)})
+                label = f"{meta['name']} ({det_conf:.2f})"
+                color = meta["color"]
+                
+                # Draw bounding box
+                cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 2)
+                # Add label tag with class-specific color background
                 (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
-                cv2.rectangle(annotated_img, (x1, max(y1 - text_h - 6, 0)), (x1 + text_w + 4, max(y1, text_h + 6)), (0, 0, 255), -1)
+                cv2.rectangle(annotated_img, (x1, max(y1 - text_h - 6, 0)), (x1 + text_w + 4, max(y1, text_h + 6)), color, -1)
                 cv2.putText(annotated_img, label, (x1 + 2, max(y1 - 4, text_h + 2)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
                 count += 1
@@ -273,23 +292,33 @@ class CrowdService:
         h, w, _ = img.shape
         annotated_img = img.copy()
         np.random.seed(int(time.time()) % 1000)
-        sim_count = np.random.randint(15, 380)
+        sim_count = np.random.randint(15, 85)
         
-        # Draw red bounding boxes for simulated verified persons
+        # Draw bounding boxes for simulated verified persons and vehicles
         draw_count = min(sim_count, 35)
         for i in range(draw_count):
-            bw = np.random.randint(15, 60)
-            bh = np.random.randint(40, 120)
+            bw = np.random.randint(20, 65)
+            bh = np.random.randint(35, 100)
             bx1 = np.random.randint(0, w - bw)
             by1 = np.random.randint(0, h - bh)
             bx2 = bx1 + bw
             by2 = by1 + bh
-            # Red bounding box for verified person
-            cv2.rectangle(annotated_img, (bx1, by1), (bx2, by2), (0, 0, 255), 2)
-            # Add "VERIFIED" label tag
-            label = f"VERIFIED"
+            
+            p = np.random.rand()
+            if p < 0.25:
+                cls_id = 0 # Person
+            elif p < 0.85:
+                cls_id = 2 # Car
+            else:
+                cls_id = 1 # Bicycle / two-wheelers
+                
+            meta = CLASS_MAP.get(cls_id, {"name": "Object", "color": (0, 255, 0)})
+            label = f"SIM {meta['name']}"
+            color = meta["color"]
+            
+            cv2.rectangle(annotated_img, (bx1, by1), (bx2, by2), color, 2)
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.3, 1)
-            cv2.rectangle(annotated_img, (bx1, max(by1 - text_h - 6, 0)), (bx1 + text_w + 4, max(by1, text_h + 6)), (0, 0, 255), -1)
+            cv2.rectangle(annotated_img, (bx1, max(by1 - text_h - 6, 0)), (bx1 + text_w + 4, max(by1, text_h + 6)), color, -1)
             cv2.putText(annotated_img, label, (bx1 + 2, max(by1 - 4, text_h + 2)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
             
@@ -462,14 +491,14 @@ class CrowdService:
 
     def _detect_single_frame(self, frame, confidence: float = None, min_box_size: int = 8):
         """
-        Runs YOLO person detection on a single video frame. Optimized for real-time
+        Runs YOLO person and vehicle detection on a single video frame. Optimized for real-time
         performance by running a single high-resolution inference with adaptive thresholds.
         Returns (annotated_frame, headcount, detected_boxes).
         """
         img_h, img_w = frame.shape[:2]
         
-        # 1. First pass at 640px to assess basic density
-        first_pass_res = self.model.predict(frame, conf=0.15, imgsz=640, classes=[0], verbose=False)
+        # 1. First pass at 640px to assess basic density (both people and vehicles)
+        first_pass_res = self.model.predict(frame, conf=0.15, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
         base_count = len(first_pass_res[0].boxes) if len(first_pass_res) > 0 else 0
         
         # 2. Adaptive thresholding based on estimated density
@@ -497,7 +526,7 @@ class CrowdService:
         base_imgsz = (base_imgsz // 32) * 32
         
         # 3. Single-pass high-resolution inference (Fast & Accurate!)
-        results = self.model.predict(frame, conf=conf_thresh, imgsz=base_imgsz, classes=[0], verbose=False)
+        results = self.model.predict(frame, conf=conf_thresh, imgsz=base_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
         
         annotated = frame.copy()
         count = 0
@@ -507,25 +536,30 @@ class CrowdService:
             for box in results[0].boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 det_conf = float(box.conf[0])
+                cls_id = int(box.cls[0])
                 bw, bh = x2 - x1, y2 - y1
 
                 if bw < mbs or bh < mbs:
                     continue
 
                 count += 1
-                detected_boxes.append((x1, y1, x2, y2, det_conf))
-                # Red bounding box for verified person
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                label = f"VERIFIED ({det_conf:.2f})"
+                detected_boxes.append((x1, y1, x2, y2, det_conf, cls_id))
+                
+                meta = CLASS_MAP.get(cls_id, {"name": "Object", "color": (0, 255, 0)})
+                label = f"{meta['name']} ({det_conf:.2f})"
+                color = meta["color"]
+
+                # Draw bounding box and label
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
                 cv2.rectangle(annotated, (x1, max(y1 - text_h - 6, 0)),
-                              (x1 + text_w + 4, max(y1, text_h + 6)), (0, 0, 255), -1)
+                              (x1 + text_w + 4, max(y1, text_h + 6)), color, -1)
                 cv2.putText(annotated, label, (x1 + 2, max(y1 - 4, text_h + 2)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
 
         # HUD overlay
-        cv2.rectangle(annotated, (10, 10), (300, 50), (15, 23, 42), -1)
-        cv2.putText(annotated, f"HEADCOUNT: {count} | VERIFIED PERSONS",
+        cv2.rectangle(annotated, (10, 10), (360, 50), (15, 23, 42), -1)
+        cv2.putText(annotated, f"OBJECTS DETECTED: {count} | SURVEILLANCE ACTIVE",
                     (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
 
         return annotated, count, detected_boxes
@@ -537,19 +571,29 @@ class CrowdService:
         annotated = frame.copy()
         count = len(boxes)
 
-        for x1, y1, x2, y2, det_conf in boxes:
-            # Red bounding box for verified person
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            label = f"VERIFIED ({det_conf:.2f})"
+        for box_data in boxes:
+            # Handle cases where box_data might be a 5-tuple (old version) or 6-tuple (new version)
+            if len(box_data) == 6:
+                x1, y1, x2, y2, det_conf, cls_id = box_data
+            else:
+                x1, y1, x2, y2, det_conf = box_data
+                cls_id = 0 # Default to person class
+
+            meta = CLASS_MAP.get(cls_id, {"name": "Object", "color": (0, 255, 0)})
+            label = f"{meta['name']} ({det_conf:.2f})"
+            color = meta["color"]
+
+            # Draw bounding box and label
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
             cv2.rectangle(annotated, (x1, max(y1 - text_h - 6, 0)),
-                          (x1 + text_w + 4, max(y1, text_h + 6)), (0, 0, 255), -1)
+                          (x1 + text_w + 4, max(y1, text_h + 6)), color, -1)
             cv2.putText(annotated, label, (x1 + 2, max(y1 - 4, text_h + 2)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
 
         # HUD overlay
-        cv2.rectangle(annotated, (10, 10), (300, 50), (15, 23, 42), -1)
-        cv2.putText(annotated, f"HEADCOUNT: {count} | VERIFIED PERSONS",
+        cv2.rectangle(annotated, (10, 10), (360, 50), (15, 23, 42), -1)
+        cv2.putText(annotated, f"OBJECTS DETECTED: {count} | SURVEILLANCE ACTIVE",
                     (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
 
         return annotated
@@ -570,16 +614,28 @@ class CrowdService:
             bx1 = np.random.randint(0, max(1, w - bw))
             by1 = np.random.randint(0, max(1, h - bh))
             bx2, by2 = bx1 + bw, by1 + bh
-            cv2.rectangle(annotated, (bx1, by1), (bx2, by2), (0, 0, 255), 2)
-            label = "VERIFIED"
+            
+            p = np.random.rand()
+            if p < 0.25:
+                cls_id = 0 # Person
+            elif p < 0.85:
+                cls_id = 2 # Car
+            else:
+                cls_id = 1 # Bicycle
+                
+            meta = CLASS_MAP.get(cls_id, {"name": "Object", "color": (0, 255, 0)})
+            label = f"SIM {meta['name']}"
+            color = meta["color"]
+
+            cv2.rectangle(annotated, (bx1, by1), (bx2, by2), color, 2)
             (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.3, 1)
             cv2.rectangle(annotated, (bx1, max(by1 - text_h - 6, 0)),
-                          (bx1 + text_w + 4, max(by1, text_h + 6)), (0, 0, 255), -1)
+                          (bx1 + text_w + 4, max(by1, text_h + 6)), color, -1)
             cv2.putText(annotated, label, (bx1 + 2, max(by1 - 4, text_h + 2)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
 
-        cv2.rectangle(annotated, (10, 10), (300, 50), (15, 23, 42), -1)
-        cv2.putText(annotated, f"HEADCOUNT: {sim_count} | SIM MODE",
+        cv2.rectangle(annotated, (10, 10), (360, 50), (15, 23, 42), -1)
+        cv2.putText(annotated, f"OBJECTS DETECTED: {sim_count} | SIM MODE",
                     (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1)
 
         return annotated, sim_count
