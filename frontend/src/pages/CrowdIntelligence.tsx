@@ -323,10 +323,18 @@ export default function CrowdIntelligence() {
       return c;
     }));
 
-    socket.onopen = async () => {
+    const sendFile = async () => {
       const buffer = await file.arrayBuffer();
-      socket.send(buffer);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(buffer);
+      }
     };
+
+    if (socket.readyState === WebSocket.OPEN) {
+      sendFile();
+    } else {
+      socket.onopen = sendFile;
+    }
   };
 
   const stopCameraWs = (cameraId: number) => {
@@ -560,10 +568,18 @@ export default function CrowdIntelligence() {
     wsRef.current = socket;
 
     // Wait for connection, then send video binary
-    socket.onopen = async () => {
+    const sendVideoFile = async () => {
       const buffer = await videoFile.arrayBuffer();
-      socket.send(buffer);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(buffer);
+      }
     };
+
+    if (socket.readyState === WebSocket.OPEN) {
+      sendVideoFile();
+    } else {
+      socket.onopen = sendVideoFile;
+    }
   }, [videoFile]);
 
   const progressPct = videoStream.totalFrames > 0
