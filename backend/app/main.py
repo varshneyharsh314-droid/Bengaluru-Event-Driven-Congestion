@@ -55,8 +55,11 @@ async def websocket_video_analysis(websocket: WebSocket):
     import concurrent.futures
     from app.services.crowd_service import crowd_service
 
-    # Retrieve the target junction query parameter
+    # Retrieve query parameters for dynamic resource logic
     junction = websocket.query_params.get("junction", "SilkBoardJunc")
+    base_congestion = websocket.query_params.get("base_congestion", "Medium")
+    priority = websocket.query_params.get("priority", "High")
+    requires_road_closure = websocket.query_params.get("requires_road_closure", "true").lower() == "true"
 
     await websocket.accept()
     tmp_path = None
@@ -99,6 +102,14 @@ async def websocket_video_analysis(websocket: WebSocket):
                 if isinstance(result, Exception):
                     raise result
 
+                # Calculate barricades recommendations based on current frame headcount
+                resources = crowd_service.update_resources(
+                    base_congestion=base_congestion,
+                    crowd_count=result["headcount"],
+                    priority=priority,
+                    requires_road_closure=requires_road_closure
+                )
+
                 payload = {
                     "event": "VIDEO_FRAME" if not result["is_last"] else "VIDEO_COMPLETE",
                     "frame_idx": result["frame_idx"],
@@ -107,6 +118,9 @@ async def websocket_video_analysis(websocket: WebSocket):
                     "density": result["density"],
                     "fps": result["fps"],
                     "is_last": result["is_last"],
+                    "barricades_recommended": resources["barricades_recommended"],
+                    "police_recommended": resources["police_recommended"],
+                    "updated_congestion": resources["updated_congestion"]
                 }
 
                 # Include annotated frame as base64 (only on sample frames)
@@ -117,6 +131,16 @@ async def websocket_video_analysis(websocket: WebSocket):
 
                 # Include summary on last message
                 if result["is_last"] and "summary" in result:
+                    avg = result["summary"].get("average_headcount", 0)
+                    summary_resources = crowd_service.update_resources(
+                        base_congestion=base_congestion,
+                        crowd_count=avg,
+                        priority=priority,
+                        requires_road_closure=requires_road_closure
+                    )
+                    result["summary"]["barricades_recommended"] = summary_resources["barricades_recommended"]
+                    result["summary"]["police_recommended"] = summary_resources["police_recommended"]
+                    result["summary"]["updated_congestion"] = summary_resources["updated_congestion"]
                     payload["summary"] = result["summary"]
                     
                     # Automate incident logging if the video shows persistent heavy traffic/congestion (avg >= 30)

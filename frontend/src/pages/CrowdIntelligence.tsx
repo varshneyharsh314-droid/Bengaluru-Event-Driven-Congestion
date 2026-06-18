@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { trafficApi, connectVideoWs } from '../services/api';
-import { Users, AlertTriangle, ShieldCheck, Siren, Upload, RefreshCw, Film, Video, Image, BarChart3, TrendingUp, Activity } from 'lucide-react';
+import { Users, AlertTriangle, ShieldCheck, Siren, Upload, RefreshCw, Film, Video, Image, BarChart3, TrendingUp, Activity, Construction } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 
@@ -33,6 +33,9 @@ interface VideoStreamState {
   frameCounts: number[];
   peakCount: number;
   summary: any | null;
+  barricadesRecommended: number;
+  policeRecommended: number;
+  updatedCongestion: string;
 }
 
 function SparklineChart({ data, width = 400, height = 80 }: { data: number[], width?: number, height?: number }) {
@@ -391,6 +394,9 @@ export default function CrowdIntelligence() {
     frameCounts: [],
     peakCount: 0,
     summary: null,
+    barricadesRecommended: 0,
+    policeRecommended: 0,
+    updatedCongestion: 'Low',
   });
 
   // Cleanup WS on unmount
@@ -519,6 +525,9 @@ export default function CrowdIntelligence() {
       frameCounts: [],
       peakCount: 0,
       summary: null,
+      barricadesRecommended: 0,
+      policeRecommended: 0,
+      updatedCongestion: 'Low',
     });
 
     const socket = connectVideoWs(
@@ -540,6 +549,9 @@ export default function CrowdIntelligence() {
               currentFrame: data.annotated_frame_base64
                 ? `data:image/jpeg;base64,${data.annotated_frame_base64}`
                 : prev.currentFrame,
+              barricadesRecommended: data.barricades_recommended || 0,
+              policeRecommended: data.police_recommended || 0,
+              updatedCongestion: data.updated_congestion || 'Low',
             };
           });
         } else if (data.event === 'VIDEO_COMPLETE') {
@@ -1217,7 +1229,7 @@ export default function CrowdIntelligence() {
 
               {/* Real-Time Stats Row */}
               {(videoStream.isStreaming || videoStream.frameCounts.length > 0) && (
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                   {/* Live Headcount */}
                   <div className="glass-panel p-5 rounded-xl border border-slate-800 text-center">
                     <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Live Detections Count</span>
@@ -1249,6 +1261,33 @@ export default function CrowdIntelligence() {
                     </span>
                     <span className="block text-[10px] text-slate-500 mt-1">crowd classification</span>
                   </div>
+
+                  {/* Target Congestion */}
+                  <div className="glass-panel p-5 rounded-xl border border-slate-800 text-center">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Target Congestion</span>
+                    <span className="text-3xl font-black text-slate-200">
+                      {videoStream.updatedCongestion}
+                    </span>
+                    <span className="block text-[10px] text-slate-500 mt-1">calculated traffic risk</span>
+                  </div>
+
+                  {/* Dispatch Target */}
+                  <div className="glass-panel p-5 rounded-xl border border-slate-800 text-center">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Dispatch Target</span>
+                    <span className="text-3xl font-black text-police-light">
+                      {videoStream.policeRecommended} Officers
+                    </span>
+                    <span className="block text-[10px] text-slate-500 mt-1">patrol mobilization</span>
+                  </div>
+
+                  {/* Barricades Recommended */}
+                  <div className="glass-panel p-5 rounded-xl border border-slate-800 text-center">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Barricades Recommended</span>
+                    <span className="text-3xl font-black text-police-gold">
+                      {videoStream.barricadesRecommended} Units
+                    </span>
+                    <span className="block text-[10px] text-slate-500 mt-1">tactical cordon units</span>
+                  </div>
                 </div>
               )}
 
@@ -1275,7 +1314,7 @@ export default function CrowdIntelligence() {
                     <BarChart3 className="w-4 h-4" />
                     <span>Video Analysis Complete</span>
                   </h3>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
                       <div>
                         <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Average Objects Count</span>
@@ -1305,6 +1344,27 @@ export default function CrowdIntelligence() {
                         }`}>{videoStream.summary.crowd_density}</span>
                       </div>
                       <ShieldCheck className="w-6 h-6 text-emerald-400 opacity-55" />
+                    </div>
+                    <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Target Congestion</span>
+                        <span className="text-2xl font-black text-slate-200">{videoStream.summary.updated_congestion || 'Low'}</span>
+                      </div>
+                      <ShieldCheck className="w-6 h-6 text-[#00ffff] opacity-55" />
+                    </div>
+                    <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Dispatch Target</span>
+                        <span className="text-2xl font-black text-slate-200">{videoStream.summary.police_recommended || 0} officers</span>
+                      </div>
+                      <Siren className="w-6 h-6 text-police-light opacity-55" />
+                    </div>
+                    <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between col-span-2 lg:col-span-1">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Barricades Recommended</span>
+                        <span className="text-2xl font-black text-slate-200">{videoStream.summary.barricades_recommended || 0} units</span>
+                      </div>
+                      <Construction className="w-6 h-6 text-police-gold opacity-55" />
                     </div>
                   </div>
                 </div>
@@ -1348,7 +1408,7 @@ export default function CrowdIntelligence() {
                 <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 animate-fade-in">
                   <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-3">Detection Metrics</h3>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
                       <div>
                         <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Traffic & Crowd Count</span>
@@ -1366,9 +1426,7 @@ export default function CrowdIntelligence() {
                       </div>
                       <AlertTriangle className="w-6 h-6 text-police-red opacity-55" />
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between">
                       <div>
                         <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Target Congestion</span>
@@ -1383,6 +1441,14 @@ export default function CrowdIntelligence() {
                         <span className="text-2xl font-black text-slate-200">{result.police_recommended} officers</span>
                       </div>
                       <Siren className="w-6 h-6 text-police-light opacity-55" />
+                    </div>
+
+                    <div className="bg-slate-900/40 p-4 rounded border border-slate-800 flex items-center justify-between md:col-span-2 lg:col-span-1">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Barricades Recommended</span>
+                        <span className="text-2xl font-black text-slate-200">{result.barricades_recommended} units</span>
+                      </div>
+                      <Construction className="w-6 h-6 text-police-gold opacity-55" />
                     </div>
                   </div>
                 </div>
