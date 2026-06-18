@@ -159,7 +159,7 @@ class CrowdService:
         img_h, img_w, _ = img.shape
         
         # Fast first pass to estimate baseline density of both people and vehicles
-        first_pass_res = self.model.predict(img, conf=0.15, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
+        first_pass_res = self.model.predict(img, conf=0.05, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
         base_count = len(first_pass_res[0].boxes) if len(first_pass_res) > 0 else 0
         
         # Adaptive thresholds and slicing grid - high-sensitivity for dense crowd counting
@@ -167,17 +167,22 @@ class CrowdService:
             if base_count < 5:
                 conf_thresh = 0.20
                 nms_iou = 0.40
-                min_box_size = 15
+                min_box_size = 12
                 grid_size = 0
-            elif base_count < 10:
+            elif base_count < 15:
                 conf_thresh = 0.08
-                nms_iou = 0.45
-                min_box_size = 10
+                nms_iou = 0.50
+                min_box_size = 8
                 grid_size = 2
-            else:
-                conf_thresh = 0.02
-                nms_iou = 0.55
+            elif base_count < 40:
+                conf_thresh = 0.03
+                nms_iou = 0.60
                 min_box_size = 4
+                grid_size = 3
+            else:
+                conf_thresh = 0.015
+                nms_iou = 0.68
+                min_box_size = 3
                 grid_size = 4
         else:
             conf_thresh = confidence
@@ -216,7 +221,14 @@ class CrowdService:
                     (img_w - slice_w, img_h - slice_h, img_w, img_h)
                 ]
                 crop_imgsz = 800
-            else: # grid_size >= 3
+            elif grid_size == 3:
+                slice_w = int(img_w * 0.40)
+                slice_h = int(img_h * 0.40)
+                x_coords = [0, int(img_w * 0.30), img_w - slice_w]
+                y_coords = [0, int(img_h * 0.30), img_h - slice_h]
+                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
+                crop_imgsz = 800
+            else: # grid_size == 4
                 slice_w = int(img_w * 0.30)
                 slice_h = int(img_h * 0.30)
                 x_coords = [0, int(img_w * 0.23), int(img_w * 0.46), img_w - slice_w]
@@ -243,7 +255,7 @@ class CrowdService:
         count = 0
         annotated_img = img.copy()
         if len(candidate_boxes) > 0:
-            keep = self._nms_numpy(candidate_boxes, candidate_scores, iou_threshold=nms_iou)
+            keep = self._nms_numpy(candidate_boxes, candidate_scores, classes=candidate_classes, iou_threshold=nms_iou)
             for idx in keep:
                 x1, y1, x2, y2 = candidate_boxes[idx]
                 det_conf = candidate_scores[idx]
@@ -265,11 +277,23 @@ class CrowdService:
         _, encoded_img = cv2.imencode('.jpg', annotated_img)
         return encoded_img.tobytes(), count
 
-    def _nms_numpy(self, boxes, scores, iou_threshold=0.45):
+    def _nms_numpy(self, boxes, scores, classes=None, iou_threshold=0.45):
         if len(boxes) == 0:
             return []
         boxes, scores = np.array(boxes), np.array(scores)
-        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        
+        if classes is not None:
+            classes = np.array(classes)
+            # Find the max coordinate to create an offset
+            max_coord = boxes.max() if boxes.size > 0 else 0
+            offsets = classes * (max_coord + 1.0)
+            x1 = boxes[:, 0] + offsets
+            y1 = boxes[:, 1] + offsets
+            x2 = boxes[:, 2] + offsets
+            y2 = boxes[:, 3] + offsets
+        else:
+            x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+            
         areas = (x2 - x1) * (y2 - y1)
         order = scores.argsort()[::-1]
         
@@ -492,63 +516,122 @@ class CrowdService:
     def _detect_single_frame(self, frame, confidence: float = None, min_box_size: int = 8):
         """
         Runs YOLO person and vehicle detection on a single video frame. Optimized for real-time
-        performance by running a single high-resolution inference with adaptive thresholds.
+        performance by running a single high-resolution inference with adaptive thresholds,
+        or employing a 3x3 slicing grid (SAHI) for dense crowds to ensure small objects are not missed.
         Returns (annotated_frame, headcount, detected_boxes).
         """
         img_h, img_w = frame.shape[:2]
         
         # 1. First pass at 640px to assess basic density (both people and vehicles)
-        first_pass_res = self.model.predict(frame, conf=0.15, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
+        first_pass_res = self.model.predict(frame, conf=0.05, imgsz=640, classes=[0, 1, 2, 3, 5, 7], verbose=False)
         base_count = len(first_pass_res[0].boxes) if len(first_pass_res) > 0 else 0
         
-        # 2. Adaptive thresholding based on estimated density
+        # 2. Adaptive thresholding and slicing grid choice based on estimated density
         if confidence is None:
             if base_count < 5:
                 conf_thresh = 0.15
-                mbs = 12
-                # Standard resolution for light scenes
-                base_imgsz = 640
+                mbs = 10
+                nms_iou = 0.40
+                grid_size = 0
             elif base_count < 15:
                 conf_thresh = 0.08
-                mbs = 8
-                # Moderate upscale
-                base_imgsz = 800
-            else:
-                conf_thresh = 0.04
+                mbs = 6
+                nms_iou = 0.50
+                grid_size = 2
+            elif base_count < 40:
+                conf_thresh = 0.03
                 mbs = 4
-                # High resolution upscale to detect small objects without slicing delay
-                base_imgsz = 1024
+                nms_iou = 0.60
+                grid_size = 3
+            else:
+                conf_thresh = 0.015
+                mbs = 3
+                nms_iou = 0.68
+                grid_size = 4  # 4x4 slicing grid for dense crowds
         else:
             conf_thresh = confidence
             mbs = min_box_size
-            base_imgsz = 800
+            nms_iou = 0.50
+            grid_size = 4 if base_count >= 40 else (3 if base_count >= 15 else (2 if base_count >= 5 else 0))
             
+        candidate_boxes = []
+        candidate_scores = []
+        candidate_classes = []
+        
+        # 3. Base full-frame inference run
+        base_imgsz = max(640, min(1280, max(img_h, img_w)))
         base_imgsz = (base_imgsz // 32) * 32
         
-        # 3. Single-pass high-resolution inference (Fast & Accurate!)
-        results = self.model.predict(frame, conf=conf_thresh, imgsz=base_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
-        
-        annotated = frame.copy()
-        count = 0
-        detected_boxes = []
-
-        if len(results) > 0 and results[0].boxes is not None:
-            for box in results[0].boxes:
+        results_full = self.model.predict(frame, conf=conf_thresh, imgsz=base_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
+        if len(results_full) > 0:
+            for box in results_full[0].boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                 det_conf = float(box.conf[0])
                 cls_id = int(box.cls[0])
-                bw, bh = x2 - x1, y2 - y1
-
-                if bw < mbs or bh < mbs:
-                    continue
-
-                count += 1
+                if (x2 - x1) >= mbs and (y2 - y1) >= mbs:
+                    candidate_boxes.append([x1, y1, x2, y2])
+                    candidate_scores.append(det_conf)
+                    candidate_classes.append(cls_id)
+                    
+        # 4. Apply SAHI slicing for video frame if grid_size > 0
+        if grid_size > 0 and (img_w >= 600 or img_h >= 600):
+            if grid_size == 2:
+                slice_w = int(img_w * 0.55)
+                slice_h = int(img_h * 0.55)
+                slices = [
+                    (0, 0, slice_w, slice_h),
+                    (img_w - slice_w, 0, img_w, slice_h),
+                    (0, img_h - slice_h, slice_w, img_h),
+                    (img_w - slice_w, img_h - slice_h, img_w, img_h)
+                ]
+                crop_imgsz = 800
+            elif grid_size == 3:
+                slice_w = int(img_w * 0.40)
+                slice_h = int(img_h * 0.40)
+                x_coords = [0, int(img_w * 0.30), img_w - slice_w]
+                y_coords = [0, int(img_h * 0.30), img_h - slice_h]
+                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
+                crop_imgsz = 800
+            else: # grid_size == 4
+                slice_w = int(img_w * 0.30)
+                slice_h = int(img_h * 0.30)
+                x_coords = [0, int(img_w * 0.23), int(img_w * 0.46), img_w - slice_w]
+                y_coords = [0, int(img_h * 0.23), int(img_h * 0.46), img_h - slice_h]
+                slices = [(xc, yc, xc + slice_w, yc + slice_h) for yc in y_coords for xc in x_coords]
+                crop_imgsz = 1024
+                
+            for sx1, sy1, sx2, sy2 in slices:
+                crop = frame[sy1:sy2, sx1:sx2]
+                res_crop = self.model.predict(crop, conf=conf_thresh, imgsz=crop_imgsz, classes=[0, 1, 2, 3, 5, 7], verbose=False)
+                if len(res_crop) > 0:
+                    for box in res_crop[0].boxes:
+                        cx1, cy1, cx2, cy2 = map(int, box.xyxy[0].tolist())
+                        det_conf = float(box.conf[0])
+                        cls_id = int(box.cls[0])
+                        gx1, gy1 = cx1 + sx1, cy1 + sy1
+                        gx2, gy2 = cx2 + sx1, cy2 + sy1
+                        if (gx2 - gx1) >= mbs and (gy2 - gy1) >= mbs:
+                            candidate_boxes.append([gx1, gy1, gx2, gy2])
+                            candidate_scores.append(det_conf)
+                            candidate_classes.append(cls_id)
+                            
+        # 5. Global NMS Deduplication
+        count = 0
+        annotated = frame.copy()
+        detected_boxes = []
+        if len(candidate_boxes) > 0:
+            keep = self._nms_numpy(candidate_boxes, candidate_scores, classes=candidate_classes, iou_threshold=nms_iou)
+            for idx in keep:
+                x1, y1, x2, y2 = candidate_boxes[idx]
+                det_conf = candidate_scores[idx]
+                cls_id = candidate_classes[idx]
+                
                 detected_boxes.append((x1, y1, x2, y2, det_conf, cls_id))
                 
                 meta = CLASS_MAP.get(cls_id, {"name": "Object", "color": (0, 255, 0)})
                 label = f"{meta['name']} ({det_conf:.2f})"
                 color = meta["color"]
-
+                
                 # Draw bounding box and label
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
@@ -556,7 +639,8 @@ class CrowdService:
                               (x1 + text_w + 4, max(y1, text_h + 6)), color, -1)
                 cv2.putText(annotated, label, (x1 + 2, max(y1 - 4, text_h + 2)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
-
+                count += 1
+                
         # HUD overlay
         cv2.rectangle(annotated, (10, 10), (360, 50), (15, 23, 42), -1)
         cv2.putText(annotated, f"OBJECTS DETECTED: {count} | SURVEILLANCE ACTIVE",
