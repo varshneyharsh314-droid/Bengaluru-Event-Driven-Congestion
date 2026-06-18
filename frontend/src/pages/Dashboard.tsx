@@ -10,10 +10,23 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchTimeline = async () => {
       try {
-        const events = await trafficApi.getTimeline();
-        setTimelineEvents(events.slice(0, 15)); // Get first 15 events
+        // Load active database incidents first
+        const activeDbEvents = await trafficApi.getActiveIncidents();
+        
+        // Load timeline backup logs
+        const fallbackEvents = await trafficApi.getTimeline();
+        
+        // Merge: place database active events at the top, and append fallback events
+        const merged = [...activeDbEvents, ...fallbackEvents];
+        setTimelineEvents(merged.slice(0, 15));
       } catch (e) {
-        console.error("Failed to load dashboard logs:", e);
+        console.error("Failed to load dashboard logs, using fallback:", e);
+        try {
+          const fallbackEvents = await trafficApi.getTimeline();
+          setTimelineEvents(fallbackEvents.slice(0, 15));
+        } catch (err) {
+          console.error("Timeline query fallback failed:", err);
+        }
       } finally {
         setLoading(false);
       }

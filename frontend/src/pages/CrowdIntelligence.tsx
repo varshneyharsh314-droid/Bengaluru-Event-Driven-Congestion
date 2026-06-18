@@ -1,6 +1,24 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { trafficApi, connectVideoWs } from '../services/api';
 import { Users, AlertTriangle, ShieldCheck, Siren, Upload, RefreshCw, Film, Video, Image, BarChart3, TrendingUp, Activity } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import L from 'leaflet';
+
+const createMarkerIcon = (color: string) => {
+  return new L.DivIcon({
+    html: `<div class="w-6 h-6 bg-${color}-500 border border-slate-900 rounded-full flex items-center justify-center shadow-lg">
+             <div class="w-2.5 h-2.5 bg-slate-100 rounded-full"></div>
+           </div>`,
+    className: 'route-icon',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+};
+
+const goldIcon = createMarkerIcon('amber');
+const redIcon = createMarkerIcon('red');
+const cyanIcon = createMarkerIcon('cyan');
+const blueIcon = createMarkerIcon('blue');
 
 type AnalysisMode = 'image' | 'video' | 'simulation';
 
@@ -294,7 +312,8 @@ export default function CrowdIntelligence() {
           }
           return cam;
         }));
-      }
+      },
+      simCameras.find(c => c.id === cameraId)?.fromJunction
     );
 
     setSimCameras(prev => prev.map(c => {
@@ -338,123 +357,7 @@ export default function CrowdIntelligence() {
     }
   };
 
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || junctionList.length === 0) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Clear canvas
-    ctx.clearRect(0, 0, width, height);
-
-    // Dark background matching the glass-panel theme
-    ctx.fillStyle = '#050B14';
-    ctx.fillRect(0, 0, width, height);
-
-    // Map node coordinates
-    const nodeCoords: Record<string, { x: number; y: number }> = {};
-    junctionList.forEach(node => {
-      nodeCoords[node.name] = projectCoords(node.lat, node.lon, width, height);
-    });
-
-    // Determine current edges state from routing results
-    const edgesToDraw = routingResult?.edges_state || edgesList.map(e => ({
-      source: e.source,
-      target: e.target,
-      congestion_level: 'Low'
-    }));
-
-    // Draw all road edges
-    edgesToDraw.forEach((edge: any) => {
-      const u = nodeCoords[edge.source];
-      const v = nodeCoords[edge.target];
-      if (!u || !v) return;
-
-      // Color based on congestion
-      let edgeColor = '#10b981'; // Green (Low)
-      if (edge.congestion_level === 'Medium') edgeColor = '#f59e0b'; // Yellow
-      if (edge.congestion_level === 'High') edgeColor = '#ef4444'; // Red
-      if (edge.congestion_level === 'Extreme') edgeColor = '#7f1d1d'; // Dark Red (Gridlock)
-
-      ctx.beginPath();
-      ctx.moveTo(u.x, u.y);
-      ctx.lineTo(v.x, v.y);
-      ctx.strokeStyle = edgeColor;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-    });
-
-    // Draw optimal route highlight (glowing path)
-    const optimalRoute = routingResult?.optimal_route || [];
-    if (optimalRoute.length > 1) {
-      ctx.beginPath();
-      for (let i = 0; i < optimalRoute.length; i++) {
-        const coords = nodeCoords[optimalRoute[i]];
-        if (coords) {
-          if (i === 0) ctx.moveTo(coords.x, coords.y);
-          else ctx.lineTo(coords.x, coords.y);
-        }
-      }
-      ctx.strokeStyle = '#00ffff'; // Neon cyan highlight
-      ctx.lineWidth = 5;
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#00ffff';
-      ctx.stroke();
-      
-      // Reset shadow for subsequent drawings
-      ctx.shadowBlur = 0;
-    }
-
-    // Draw junction nodes (circles)
-    junctionList.forEach(node => {
-      const coords = nodeCoords[node.name];
-      if (!coords) return;
-
-      const isStart = node.name === simSource;
-      const isEnd = node.name === simTarget;
-      const isOnPath = optimalRoute.includes(node.name);
-
-      ctx.beginPath();
-      ctx.arc(coords.x, coords.y, 7, 0, Math.PI * 2);
-      
-      if (isStart) {
-        ctx.fillStyle = '#dcba55'; // Gold for source
-      } else if (isEnd) {
-        ctx.fillStyle = '#ef4444'; // Red for destination
-      } else if (isOnPath) {
-        ctx.fillStyle = '#00ffff'; // Cyan if on calculated path
-      } else {
-        ctx.fillStyle = '#334155'; // Grey for others
-      }
-      ctx.fill();
-
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Label
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 8px sans-serif';
-      ctx.textAlign = 'center';
-      
-      // Shorten label for cleaner visual representation
-      const cleanName = node.name
-        .replace('Junc', '')
-        .replace('Junction', '')
-        .replace('Layout', '')
-        .replace('Checkpost', '')
-        .replace('WaterTank', '');
-        
-      ctx.fillText(cleanName, coords.x, coords.y - 10);
-    });
-  }, [junctionList, edgesList, routingResult, simSource, simTarget]);
+  // Canvas is replaced by Leaflet MapContainer
 
   // Image mode state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -975,13 +878,91 @@ export default function CrowdIntelligence() {
                   <Activity className="w-4 h-4 text-[#00ffff] animate-pulse" />
                   <span>Real-Time Bengaluru Junctions Map Graph</span>
                 </h3>
-                <div className="flex flex-col items-center bg-[#050B14] rounded-lg border border-slate-800/60 p-4">
-                  <canvas 
-                    ref={canvasRef} 
-                    width={650} 
-                    height={300} 
-                    className="w-full h-[300px] bg-[#050B14]"
-                  />
+                <div className="flex flex-col items-center bg-[#050B14] rounded-lg border border-slate-800/60 p-4 w-full">
+                  <div className="w-full h-[300px] bg-[#050B14] rounded overflow-hidden border border-slate-800 relative z-0">
+                    <MapContainer center={[12.9225, 77.64]} zoom={13} scrollWheelZoom={true} style={{ height: '100%', width: '100%' }}>
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                      />
+                      
+                      {/* Render edges state */}
+                      {(() => {
+                        const nodeCoordsLookup: Record<string, [number, number]> = {};
+                        junctionList.forEach(node => {
+                          nodeCoordsLookup[node.name] = [node.lat, node.lon];
+                        });
+
+                        const edgesToDraw = routingResult?.edges_state || edgesList.map(e => ({
+                          source: e.source,
+                          target: e.target,
+                          congestion_level: 'Low'
+                        }));
+
+                        return edgesToDraw.map((edge: any, index: number) => {
+                          const u = nodeCoordsLookup[edge.source];
+                          const v = nodeCoordsLookup[edge.target];
+                          if (!u || !v) return null;
+
+                          let edgeColor = '#10b981'; // Green (Low)
+                          if (edge.congestion_level === 'Medium') edgeColor = '#f59e0b'; // Yellow
+                          if (edge.congestion_level === 'High') edgeColor = '#ef4444'; // Red
+                          if (edge.congestion_level === 'Extreme') edgeColor = '#7f1d1d'; // Dark Red (Gridlock)
+
+                          return (
+                            <Polyline
+                              key={`edge-${index}`}
+                              positions={[u, v]}
+                              pathOptions={{ color: edgeColor, weight: 4, opacity: 0.8 }}
+                            />
+                          );
+                        });
+                      })()}
+
+                      {/* Render optimal route highlight */}
+                      {(() => {
+                        const nodeCoordsLookup: Record<string, [number, number]> = {};
+                        junctionList.forEach(node => {
+                          nodeCoordsLookup[node.name] = [node.lat, node.lon];
+                        });
+
+                        const optimalRoute = routingResult?.optimal_route || [];
+                        const routePositions = optimalRoute.map((node: string) => nodeCoordsLookup[node]).filter(Boolean);
+
+                        if (routePositions.length > 1) {
+                          return (
+                            <Polyline
+                              positions={routePositions}
+                              pathOptions={{ color: '#00ffff', weight: 6, opacity: 0.95 }}
+                            />
+                          );
+                        }
+                        return null;
+                      })()}
+
+                      {/* Render markers for junctions */}
+                      {junctionList.map(node => {
+                        const isStart = node.name === simSource;
+                        const isEnd = node.name === simTarget;
+                        const isOnPath = (routingResult?.optimal_route || []).includes(node.name);
+
+                        let markerIcon = blueIcon;
+                        if (isStart) markerIcon = goldIcon;
+                        else if (isEnd) markerIcon = redIcon;
+                        else if (isOnPath) markerIcon = cyanIcon;
+
+                        return (
+                          <Marker key={node.name} position={[node.lat, node.lon]} icon={markerIcon}>
+                            <Popup>
+                              <div className="p-1 text-slate-900">
+                                <h4 className="font-extrabold text-xs">{node.name}</h4>
+                              </div>
+                            </Popup>
+                          </Marker>
+                        );
+                      })}
+                    </MapContainer>
+                  </div>
                   
                   {/* Graph Map Legend */}
                   <div className="flex flex-wrap gap-4 justify-center mt-3 text-[10px] font-bold text-slate-400 select-none uppercase">

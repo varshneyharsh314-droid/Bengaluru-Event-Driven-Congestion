@@ -16,6 +16,7 @@ import PoliceAlerts from './pages/PoliceAlerts';
 import TimelineReplay from './pages/TimelineReplay';
 import FeedbackCenter from './pages/FeedbackCenter';
 import About from './pages/About';
+import IncidentCenter from './pages/IncidentCenter';
 
 function Layout({ children, onLogout, user }: { children: React.ReactNode, onLogout: () => void, user: any }) {
   const location = useLocation();
@@ -49,6 +50,7 @@ function Layout({ children, onLogout, user }: { children: React.ReactNode, onLog
     { name: 'Police Dispatcher', path: '/alerts', icon: Siren },
     { name: 'Timeline Replay', path: '/timeline', icon: Clock },
     { name: 'Feedback & Retraining', path: '/feedback', icon: Radio },
+    { name: 'Incident Center', path: '/incidents', icon: ShieldAlert },
     { name: 'System Info', path: '/about', icon: HelpCircle },
   ];
 
@@ -305,6 +307,7 @@ export default function App() {
           <Route path="/alerts" element={<PoliceAlerts />} />
           <Route path="/timeline" element={<TimelineReplay />} />
           <Route path="/feedback" element={<FeedbackCenter />} />
+          <Route path="/incidents" element={<IncidentCenter />} />
           <Route path="/about" element={<About />} />
         </Routes>
       </Layout>

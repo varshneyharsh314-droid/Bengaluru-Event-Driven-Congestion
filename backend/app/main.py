@@ -55,6 +55,9 @@ async def websocket_video_analysis(websocket: WebSocket):
     import concurrent.futures
     from app.services.crowd_service import crowd_service
 
+    # Retrieve the target junction query parameter
+    junction = websocket.query_params.get("junction", "SilkBoardJunc")
+
     await websocket.accept()
     tmp_path = None
     stop_event = threading.Event()
@@ -115,6 +118,64 @@ async def websocket_video_analysis(websocket: WebSocket):
                 # Include summary on last message
                 if result["is_last"] and "summary" in result:
                     payload["summary"] = result["summary"]
+                    
+                    # Automate incident logging if the video shows persistent heavy traffic/congestion (avg >= 30)
+                    avg = result["summary"].get("average_headcount", 0)
+                    if avg >= 30:
+                        from app.core.database import SessionLocal
+                        from app.db import models
+                        from app.services.route_service import route_service
+                        
+                        db = SessionLocal()
+                        try:
+                            # Verify if there is already an active crowd congestion incident at this junction
+                            existing = db.query(models.Event).filter(
+                                models.Event.junction == junction,
+                                models.Event.status == "active",
+                                models.Event.event_cause == "crowd_congestion"
+                            ).first()
+                            
+                            if not existing:
+                                import datetime
+                                timestamp_str = datetime.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+                                event_id = f"EV-CROWD-{timestamp_str[-6:]}"
+                                coords = route_service.junction_coords.get(junction, (12.9176, 77.6246))
+                                
+                                db_event = models.Event(
+                                    event_id=event_id,
+                                    event_type="unplanned",
+                                    event_cause="crowd_congestion",
+                                    priority="High",
+                                    requires_road_closure=False,
+                                    hour=datetime.datetime.utcnow().hour,
+                                    day_of_week=datetime.datetime.utcnow().weekday(),
+                                    duration_hours=1.0,
+                                    zone="Central Zone",
+                                    junction=junction,
+                                    latitude=coords[0],
+                                    longitude=coords[1],
+                                    status="active",
+                                    description=f"Automated crowd congestion detected via CCTV Camera. Average headcount: {avg} people."
+                                )
+                                db.add(db_event)
+                                
+                                # Log standard prediction stats
+                                db_pred = models.CongestionPrediction(
+                                    event_id=event_id,
+                                    predicted_congestion="High",
+                                    prob_low=0.10,
+                                    prob_med=0.20,
+                                    prob_high=0.70,
+                                    predicted_delay_min=int(avg * 1.5)
+                                )
+                                db.add(db_pred)
+                                db.commit()
+                                print(f"Registered new database active incident: {event_id} at {junction}")
+                        except Exception as ex:
+                            print(f"Error logging crowd incident: {ex}")
+                            db.rollback()
+                        finally:
+                            db.close()
 
                 await websocket.send_json(payload)
         finally:

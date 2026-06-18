@@ -151,6 +151,16 @@ export const trafficApi = {
   }) => {
     const response = await api.post('/traffic/dynamic-routing', payload);
     return response.data;
+  },
+
+  getActiveIncidents: async () => {
+    const response = await api.get('/traffic/active-incidents');
+    return response.data;
+  },
+
+  resolveIncident: async (eventId: string) => {
+    const response = await api.post(`/traffic/incidents/${eventId}/resolve`);
+    return response.data;
   }
 };
 
@@ -158,8 +168,15 @@ export const trafficApi = {
  * Opens a WebSocket connection for real-time video analysis streaming.
  * Send a video file as binary, receive per-frame results as JSON.
  */
-export function connectVideoWs(onMessage: (data: any) => void, onClose?: () => void, onError?: (err: Event) => void) {
-  const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/video-analysis`;
+export function connectVideoWs(
+  onMessage: (data: any) => void,
+  onClose?: () => void,
+  onError?: (err: Event) => void,
+  junction?: string
+) {
+  const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/video-analysis${
+    junction ? `?junction=${encodeURIComponent(junction)}` : ''
+  }`;
   const socket = new WebSocket(wsUrl);
 
   socket.onmessage = (event) => {

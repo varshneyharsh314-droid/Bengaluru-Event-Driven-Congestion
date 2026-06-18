@@ -532,3 +532,54 @@ def get_dynamic_route(
         edges_state=result["edges_state"],
         status=result["status"]
     )
+
+@router.get("/active-incidents")
+def get_active_incidents(
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user)
+):
+    """
+    Returns a list of all active incidents/events in the database.
+    """
+    events = db.query(models.Event).filter(models.Event.status == "active").order_by(models.Event.timestamp.desc()).all()
+    results = []
+    for ev in events:
+        delay = 15
+        police_deployed = 5
+        if ev.prediction:
+            delay = ev.prediction.predicted_delay_min
+        if ev.crowd_analyses:
+            latest_analysis = sorted(ev.crowd_analyses, key=lambda x: x.timestamp, reverse=True)[0]
+            police_deployed = latest_analysis.police_recommended
+            
+        results.append({
+            "event_id": ev.event_id,
+            "junction": ev.junction,
+            "event_type": ev.event_type,
+            "event_cause": ev.event_cause,
+            "priority": ev.priority,
+            "congestion_level": ev.prediction.predicted_congestion if ev.prediction else "Medium",
+            "delay_min": delay,
+            "police_deployed": police_deployed,
+            "description": ev.description,
+            "timestamp": ev.timestamp.isoformat() if ev.timestamp else None
+        })
+    return results
+
+@router.post("/incidents/{event_id}/resolve")
+def resolve_incident(
+    event_id: str,
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user)
+):
+    """
+    Manually resolves an active traffic incident by setting its status to 'cleared'.
+    """
+    event = db.query(models.Event).filter(models.Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Incident not found")
+        
+    event.status = "cleared"
+    db.commit()
+    return {"status": "success", "message": f"Incident {event_id} successfully marked as resolved."}
+
