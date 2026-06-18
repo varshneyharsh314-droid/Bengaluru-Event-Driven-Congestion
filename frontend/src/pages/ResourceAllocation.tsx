@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Siren, Sliders, Settings2 } from 'lucide-react';
+import { ShieldCheck, Siren, Sliders, Settings2, Tv } from 'lucide-react';
 
 export default function ResourceAllocation() {
   const [congestion, setCongestion] = useState('High');
@@ -30,10 +30,16 @@ export default function ResourceAllocation() {
     if (closure) barricades += 8;
     barricades = Math.min(30, barricades);
 
-    return { police, barricades };
+    // VMS Boards calculation matching resource_service.py
+    let vms = 1;
+    if (cong === 'HIGH' || cong === 'EXTREME') vms += 1;
+    if (prio === 'HIGH') vms += 1;
+    vms = Math.min(5, vms);
+
+    return { police, barricades, vms };
   };
 
-  const { police, barricades } = calculateDeployment();
+  const { police, barricades, vms } = calculateDeployment();
 
   return (
     <div className="space-y-8">
@@ -94,26 +100,37 @@ export default function ResourceAllocation() {
 
         {/* Right Side: Deployment Recommendations */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-blue">
               <div>
-                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Officer Personnel</span>
-                <span className="text-4xl font-black text-slate-100">{police} Officers</span>
-                <p className="text-[10px] text-slate-500 mt-2">Recommended active field deployments</p>
+                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Officer Personnel</span>
+                <span className="text-2xl font-black text-slate-100">{police} Officers</span>
+                <p className="text-[9px] text-slate-500 mt-2">Active field dispatch units</p>
               </div>
-              <div className="p-4 bg-slate-800/40 rounded-xl text-police-light border border-slate-700/30">
-                <Siren className="w-8 h-8" />
+              <div className="p-3 bg-slate-800/40 rounded-xl text-police-light border border-slate-700/30">
+                <Siren className="w-6 h-6" />
               </div>
             </div>
 
             <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-gold">
               <div>
-                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Blockades / Barricades</span>
-                <span className="text-4xl font-black text-slate-100">{barricades} Units</span>
-                <p className="text-[10px] text-slate-500 mt-2">Cordon markers for bypass lanes</p>
+                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Barricades</span>
+                <span className="text-2xl font-black text-slate-100">{barricades} Units</span>
+                <p className="text-[9px] text-slate-500 mt-2">Cordon bypass blockades</p>
               </div>
-              <div className="p-4 bg-slate-800/40 rounded-xl text-police-gold border border-slate-700/30">
-                <ShieldCheck className="w-8 h-8" />
+              <div className="p-3 bg-slate-800/40 rounded-xl text-police-gold border border-slate-700/30">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-blue">
+              <div>
+                <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">VMS Boards</span>
+                <span className="text-2xl font-black text-slate-100">{vms} Boards</span>
+                <p className="text-[9px] text-slate-500 mt-2">Variable sign boards</p>
+              </div>
+              <div className="p-3 bg-slate-800/40 rounded-xl text-emerald-400 border border-slate-700/30">
+                <Tv className="w-6 h-6" />
               </div>
             </div>
           </div>
@@ -127,6 +144,7 @@ export default function ResourceAllocation() {
             <p className="text-xs text-slate-400">
               The allocation parameters recommend mobilizing {police} officers to the respective junction points. 
               {closure && " Since a cordon/road closure is requested, the barricades should be positioned 100 meters upstream from the main gridlock nodes."}
+              {" VMS (Variable Message Sign) boards should be placed at adjacent intersections to warn oncoming commuters and direct traffic along recommended routes."}
             </p>
           </div>
         </div>

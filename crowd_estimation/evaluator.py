@@ -3,7 +3,7 @@ import cv2
 import time
 import numpy as np
 import pandas as pd
-from ultralytics import YOLO
+
 
 class CrowdEvaluator:
     """
@@ -19,8 +19,12 @@ class CrowdEvaluator:
     def load_model(self):
         """Loads the YOLOv8 model safely."""
         try:
+            from ultralytics import YOLO
             self.model = YOLO(self.model_name)
             print(f"YOLOv8 Model '{self.model_name}' loaded successfully.")
+        except ImportError:
+            print("Warning: ultralytics not installed. Running in simulation mode.")
+            self.model = None
         except Exception as e:
             print(f"Error loading YOLOv8 model: {e}. Falling back to simulation.")
             self.model = None
@@ -65,9 +69,9 @@ class CrowdEvaluator:
                 # Draw boxes
                 for box in boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                    conf = float(box.conf[0])
+                    det_conf = float(box.conf[0])
                     cv2.rectangle(annotated_img, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                    cv2.putText(annotated_img, f"p {conf:.2f}", (x1, max(y1 - 5, 12)),
+                    cv2.putText(annotated_img, f"p {det_conf:.2f}", (x1, max(y1 - 5, 12)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
         else:
             # Simulation mode
@@ -147,6 +151,7 @@ class CrowdEvaluator:
         
         counts = []
         frame_idx = 0
+        current_count = 0
         sample_rate = max(1, fps // 2)
         
         while cap.isOpened() and frame_idx < max_frames:

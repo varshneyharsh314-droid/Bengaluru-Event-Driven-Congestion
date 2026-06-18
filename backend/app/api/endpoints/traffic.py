@@ -45,6 +45,7 @@ def predict_congestion(
         junction=event_in.junction,
         latitude=event_in.latitude,
         longitude=event_in.longitude,
+        description=event_in.description,
         status="active"
     )
     db.add(db_event)
@@ -53,6 +54,8 @@ def predict_congestion(
     pred_res = congestion_service.predict(event_in.model_dump())
     pred_class = pred_res["predicted_congestion"]
     probs = pred_res["probabilities"]
+    pred_dur = pred_res.get("predicted_duration_minutes", event_in.duration_hours * 60.0)
+    pred_rad = pred_res.get("predicted_impact_radius_meters", 200.0)
 
     # Calculate expected delays and resource configurations
     if pred_class == "High":
@@ -63,7 +66,11 @@ def predict_congestion(
         expected_delay_min = min(45, max(5, int(event_in.duration_hours * 60 * 0.25)))
 
     res_dispatch = resource_service.calculate_deployment(
-        pred_class, event_in.priority, event_in.requires_road_closure
+        pred_class, 
+        event_in.priority, 
+        event_in.requires_road_closure,
+        predicted_duration_minutes=pred_dur,
+        predicted_impact_radius_meters=pred_rad
     )
 
     # 4. Write to predictions table
@@ -73,7 +80,9 @@ def predict_congestion(
         prob_low=probs["Low"],
         prob_med=probs["Medium"],
         prob_high=probs["High"],
-        predicted_delay_min=expected_delay_min
+        predicted_delay_min=expected_delay_min,
+        predicted_duration_minutes=pred_dur,
+        predicted_impact_radius_meters=pred_rad
     )
     db.add(db_prediction)
     db.commit()
@@ -99,9 +108,12 @@ def predict_congestion(
         predicted_congestion=pred_class,
         probabilities=probs,
         predicted_delay_min=expected_delay_min,
+        predicted_duration_minutes=pred_dur,
+        predicted_impact_radius_meters=pred_rad,
         resources=schemas.ResourceDetails(
             police_officers=res_dispatch["police_officers"],
-            barricades=res_dispatch["barricades"]
+            barricades=res_dispatch["barricades"],
+            vms_boards=res_dispatch.get("vms_boards", 0)
         )
     )
 
@@ -139,7 +151,11 @@ def analyze_crowd(
     contents = file.file.read()
     
     # Process through YOLO detector
-    _, crowd_count = crowd_service.detect_image_bytes(contents)
+    annotated_bytes, crowd_count = crowd_service.detect_image_bytes(contents)
+    
+    # Base64 encode the annotated image
+    import base64
+    annotated_base64 = base64.b64encode(annotated_bytes).decode('utf-8')
     
     # Retrieve dynamic resource scaling configs
     analysis = crowd_service.update_resources(
@@ -160,7 +176,74 @@ def analyze_crowd(
     db.commit()
     db.refresh(db_analysis)
 
-    return db_analysis
+    return schemas.CrowdAnalysisResponse(
+        id=db_analysis.id,
+        event_id=db_analysis.event_id,
+        crowd_count=db_analysis.crowd_count,
+        crowd_density=db_analysis.crowd_density,
+        video_path=db_analysis.video_path,
+        updated_congestion=db_analysis.updated_congestion,
+        police_recommended=db_analysis.police_recommended,
+        barricades_recommended=db_analysis.barricades_recommended,
+        timestamp=db_analysis.timestamp,
+        annotated_image_base64=annotated_base64
+    )
+
+@router.post("/analyze-video", response_model=schemas.VideoAnalysisResponse)
+def analyze_video(
+    event_id: str = Form(...),
+    base_congestion: str = Form("Medium"),
+    priority: str = Form("High"),
+    requires_road_closure: bool = Form(False),
+    sample_every: int = Form(-1),
+    file: UploadFile = File(...),
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user)
+):
+    """
+    Accepts CCTV video file uploads and processes frame-by-frame using YOLOv8
+    for real-time headcount analysis. Returns summary statistics and per-frame counts.
+    """
+    import tempfile
+    import os
+
+    # Validate event exists
+    event = db.query(models.Event).filter(models.Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event log not found.")
+
+    # Save uploaded video to temp file
+    suffix = os.path.splitext(file.filename or "video.mp4")[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(file.file.read())
+        tmp_path = tmp.name
+
+    try:
+        # Process video through crowd service
+        summary = crowd_service.process_video_complete(
+            tmp_path, sample_every=sample_every
+        )
+
+        avg_count = summary.get("average_headcount", 0)
+
+        # Get resource recommendations based on average headcount
+        resources = crowd_service.update_resources(
+            base_congestion, avg_count, priority, requires_road_closure
+        )
+
+        return schemas.VideoAnalysisResponse(
+            total_frames_processed=summary["total_frames_processed"],
+            peak_headcount=summary["peak_headcount"],
+            average_headcount=summary["average_headcount"],
+            crowd_density=summary["crowd_density"],
+            per_frame_counts=summary.get("per_frame_counts", []),
+            updated_congestion=resources["updated_congestion"],
+            police_recommended=resources["police_recommended"],
+            barricades_recommended=resources["barricades_recommended"]
+        )
+    finally:
+        # Clean up temp file
+        os.unlink(tmp_path)
 
 @router.post("/emergency-route", response_model=schemas.EmergencyRouteResponse)
 def get_emergency_route(
@@ -174,7 +257,14 @@ def get_emergency_route(
     """
     # Run graph solver
     result = route_service.find_emergency_corridor(
-        req.source, req.destination, req.blocked_roads, req.congestion_multiplier, req.algorithm
+        req.source, 
+        req.destination, 
+        req.blocked_roads, 
+        req.congestion_multiplier, 
+        req.algorithm,
+        incident_lat=req.incident_lat,
+        incident_lon=req.incident_lon,
+        predicted_impact_radius_meters=req.predicted_impact_radius_meters
     )
     
     if "error" in result:
@@ -201,7 +291,9 @@ def get_emergency_route(
         emergency_route=result["emergency_route"],
         emergency_time_congested=result["emergency_time_congested"],
         time_saved_minutes=result["time_saved_minutes"],
-        algorithm_used=result["algorithm_used"]
+        algorithm_used=result["algorithm_used"],
+        nearest_junction_node=result.get("nearest_junction_node"),
+        resolved_blocked_roads=result.get("resolved_blocked_roads")
     )
 
 @router.post("/nearest-police-station")

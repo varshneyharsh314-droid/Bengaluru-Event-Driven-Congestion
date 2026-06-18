@@ -42,6 +42,7 @@ class EventBase(BaseModel):
     junction: str
     latitude: float
     longitude: float
+    description: Optional[str] = ""
 
 class EventCreate(EventBase):
     pass
@@ -74,6 +75,7 @@ class PredictionResponse(PredictionBase):
 class ResourceDetails(BaseModel):
     police_officers: int
     barricades: int
+    vms_boards: Optional[int] = 0
 
 # Full Incident Prediction Response
 class IncidentPredictionResult(BaseModel):
@@ -82,6 +84,8 @@ class IncidentPredictionResult(BaseModel):
     probabilities: Dict[str, float]
     predicted_delay_min: int
     resources: ResourceDetails
+    predicted_duration_minutes: Optional[float] = None
+    predicted_impact_radius_meters: Optional[float] = None
 
 # Police Station Schemas
 class PoliceStationBase(BaseModel):
@@ -133,6 +137,7 @@ class CrowdAnalysisResponse(BaseModel):
     police_recommended: int
     barricades_recommended: int
     timestamp: datetime
+    annotated_image_base64: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -160,6 +165,9 @@ class EmergencyRouteRequest(BaseModel):
     blocked_roads: List[Tuple[str, str]] = Field(default_factory=list)
     congestion_multiplier: float = 10.0
     algorithm: str = "astar"
+    incident_lat: Optional[float] = None
+    incident_lon: Optional[float] = None
+    predicted_impact_radius_meters: Optional[float] = None
 
 class EmergencyRouteResponse(BaseModel):
     normal_route: List[str]
@@ -169,6 +177,8 @@ class EmergencyRouteResponse(BaseModel):
     emergency_time_congested: float
     time_saved_minutes: float
     algorithm_used: str
+    nearest_junction_node: Optional[str] = None
+    resolved_blocked_roads: Optional[List[Tuple[str, str]]] = None
 
 class TimelineEventsResponse(BaseModel):
     event_id: str
@@ -187,3 +197,13 @@ class RetrainingStats(BaseModel):
     new_accuracy: float
     old_mae: float
     new_mae: float
+
+class VideoAnalysisResponse(BaseModel):
+    total_frames_processed: int
+    peak_headcount: int
+    average_headcount: int
+    crowd_density: str
+    per_frame_counts: List[int] = []
+    updated_congestion: Optional[str] = None
+    police_recommended: Optional[int] = None
+    barricades_recommended: Optional[int] = None

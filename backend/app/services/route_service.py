@@ -94,20 +94,58 @@ class RouteService:
         self, 
         source: str, 
         target: str, 
-        blocked_roads: List[Tuple[str, str]], 
+        blocked_roads: List[Tuple[str, str]] = None, 
         congestion_multiplier: float = 10.0, 
-        algorithm: str = "astar"
+        algorithm: str = "astar",
+        incident_lat: float = None,
+        incident_lon: float = None,
+        predicted_impact_radius_meters: float = None
     ) -> Dict[str, Any]:
         """
         Calculates optimal emergency corridor by routing around high congested nodes.
+        Supports coordinates and radial weight inflation.
         """
         if source not in self.G or target not in self.G:
             return {"error": f"Junction {source} or {target} not recognized in Bengaluru graph."}
 
+        if blocked_roads is None:
+            blocked_roads = []
+
         congested_G = self.G.copy()
-        
-        # Apply congestion multipliers to blocked roads
-        for u, v in blocked_roads:
+        resolved_blocked_roads = list(blocked_roads)
+        nearest_node = None
+
+        # Determine blocked roads dynamically using coordinates and impact radius
+        if (incident_lat is not None and 
+            incident_lon is not None and 
+            predicted_impact_radius_meters is not None):
+            
+            radius_km = predicted_impact_radius_meters / 1000.0
+            
+            # Find nearest node
+            min_dist = float('inf')
+            for node, data in self.G.nodes(data=True):
+                dist = self.calculate_haversine(incident_lat, incident_lon, data['lat'], data['lon'])
+                if dist < min_dist:
+                    min_dist = dist
+                    nearest_node = node
+            
+            # Identify edges within radius (u, v or midpoint)
+            for u, v, data in self.G.edges(data=True):
+                u_lat, u_lon = self.G.nodes[u]['lat'], self.G.nodes[u]['lon']
+                v_lat, v_lon = self.G.nodes[v]['lat'], self.G.nodes[v]['lon']
+                mid_lat = (u_lat + v_lat) / 2.0
+                mid_lon = (u_lon + v_lon) / 2.0
+                
+                dist_u = self.calculate_haversine(incident_lat, incident_lon, u_lat, u_lon)
+                dist_v = self.calculate_haversine(incident_lat, incident_lon, v_lat, v_lon)
+                dist_mid = self.calculate_haversine(incident_lat, incident_lon, mid_lat, mid_lon)
+                
+                if dist_u <= radius_km or dist_v <= radius_km or dist_mid <= radius_km:
+                    resolved_blocked_roads.append((u, v))
+
+        # Apply congestion multipliers to blocked/congested roads
+        for u, v in resolved_blocked_roads:
             if congested_G.has_edge(u, v):
                 congested_G[u][v]['weight'] = congested_G[u][v]['base_weight'] * congestion_multiplier
 
@@ -145,7 +183,9 @@ class RouteService:
             "emergency_route": emergency_route,
             "emergency_time_congested": float(congested_emergency_time),
             "time_saved_minutes": float(max(0.0, time_saved)),
-            "algorithm_used": "A* Search" if algorithm.lower() == 'astar' else "Dijkstra's Algorithm"
+            "algorithm_used": "A* Search" if algorithm.lower() == 'astar' else "Dijkstra's Algorithm",
+            "nearest_junction_node": nearest_node,
+            "resolved_blocked_roads": resolved_blocked_roads
         }
 
 route_service = RouteService()

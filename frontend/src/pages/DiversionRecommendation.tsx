@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import { trafficApi } from '../services/api';
 import { RefreshCw, Play, ShieldAlert, Sparkles, Navigation } from 'lucide-react';
@@ -32,8 +32,14 @@ const blueIcon = createMarkerIcon('blue');
 export default function DiversionRecommendation() {
   const [source, setSource] = useState('SilkBoardJunc');
   const [destination, setDestination] = useState('IbblurJunction');
+  
+  // Rerouting settings
+  const [useRadialIncident, setUseRadialIncident] = useState(true);
+  const [incidentJunction, setIncidentJunction] = useState('HSRLayout14thMain');
+  const [incidentRadius, setIncidentRadius] = useState(400);
   const [blockedRoad, setBlockedRoad] = useState<string>('HSRLayout14thMain,AgaraJunction');
-  const [multiplier, setMultiplier] = useState(10.0);
+  
+  const [multiplier, setMultiplier] = useState(50.0);
   const [algorithm, setAlgorithm] = useState('astar');
 
   const [routeData, setRouteData] = useState<any | null>(null);
@@ -46,22 +52,30 @@ export default function DiversionRecommendation() {
     setRouteData(null);
     setDiversionText(null);
     try {
-      // Formulate blocked roads array: e.g. [["HSRLayout14thMain", "AgaraJunction"]]
-      let blockedList: [string, string][] = [];
-      if (blockedRoad) {
-        const parts = blockedRoad.split(',');
-        if (parts.length === 2) {
-          blockedList.push([parts[0].trim(), parts[1].trim()]);
-        }
-      }
-
-      const payload = {
+      let payload: any = {
         source,
         destination,
-        blocked_roads: blockedList,
         congestion_multiplier: Number(multiplier),
         algorithm
       };
+
+      if (useRadialIncident) {
+        const coords = junctionCoords[incidentJunction];
+        payload.incident_lat = coords[0];
+        payload.incident_lon = coords[1];
+        payload.predicted_impact_radius_meters = Number(incidentRadius);
+        payload.blocked_roads = [];
+      } else {
+        // Formulate blocked roads array: e.g. [["HSRLayout14thMain", "AgaraJunction"]]
+        let blockedList: [string, string][] = [];
+        if (blockedRoad) {
+          const parts = blockedRoad.split(',');
+          if (parts.length === 2) {
+            blockedList.push([parts[0].trim(), parts[1].trim()]);
+          }
+        }
+        payload.blocked_roads = blockedList;
+      }
 
       const routeResult = await trafficApi.getEmergencyRoute(payload);
       setRouteData(routeResult);
@@ -79,6 +93,7 @@ export default function DiversionRecommendation() {
   // Build route lines coordinates
   const normalRouteCoords = routeData?.normal_route?.map((node: string) => junctionCoords[node]).filter(Boolean) || [];
   const emergencyRouteCoords = routeData?.emergency_route?.map((node: string) => junctionCoords[node]).filter(Boolean) || [];
+  const activeIncidentCoord = useRadialIncident && junctionCoords[incidentJunction] ? junctionCoords[incidentJunction] : null;
 
   return (
     <div className="space-y-8">
@@ -124,18 +139,57 @@ export default function DiversionRecommendation() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Blocked Road Links (Source,Target)</label>
-              <select 
-                value={blockedRoad} 
-                onChange={(e) => setBlockedRoad(e.target.value)}
-                className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
-              >
-                <option value="">No Blocked Roads</option>
-                <option value="HSRLayout14thMain,AgaraJunction">HSRLayout14thMain ➔ AgaraJunction</option>
-                <option value="SilkBoardJunc,HSRLayout14thMain">SilkBoardJunc ➔ HSRLayout14thMain</option>
-                <option value="AgaraJunction,IbblurJunction">AgaraJunction ➔ IbblurJunction</option>
-              </select>
+            <div className="border-t border-slate-850 pt-3">
+              <div className="flex items-center justify-between mb-3">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase">Simulate Dynamic Incident Circle</label>
+                <input 
+                  type="checkbox"
+                  checked={useRadialIncident}
+                  onChange={(e) => setUseRadialIncident(e.target.checked)}
+                  className="w-4 h-4 bg-slate-800 border-slate-700 rounded text-police-gold"
+                />
+              </div>
+
+              {useRadialIncident ? (
+                <div className="grid grid-cols-2 gap-4 animate-fade-in">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Incident Node Location</label>
+                    <select 
+                      value={incidentJunction} 
+                      onChange={(e) => setIncidentJunction(e.target.value)}
+                      className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                    >
+                      {Object.keys(junctionCoords).map(key => (
+                        <option key={key} value={key}>{key}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Impact Radius (Meters)</label>
+                    <input 
+                      type="number"
+                      min="50" max="2000" step="50"
+                      value={incidentRadius}
+                      onChange={(e) => setIncidentRadius(Number(e.target.value))}
+                      className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="animate-fade-in">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Blocked Road Links (Source,Target)</label>
+                  <select 
+                    value={blockedRoad} 
+                    onChange={(e) => setBlockedRoad(e.target.value)}
+                    className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                  >
+                    <option value="">No Blocked Roads</option>
+                    <option value="HSRLayout14thMain,AgaraJunction">HSRLayout14thMain ➔ AgaraJunction</option>
+                    <option value="SilkBoardJunc,HSRLayout14thMain">SilkBoardJunc ➔ HSRLayout14thMain</option>
+                    <option value="AgaraJunction,IbblurJunction">AgaraJunction ➔ IbblurJunction</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -198,6 +252,11 @@ export default function DiversionRecommendation() {
 
               <div className="text-xs text-slate-400 space-y-2">
                 <p><strong>Emergency path:</strong> {routeData.emergency_route.join(' ➔ ')}</p>
+                {routeData.resolved_blocked_roads && routeData.resolved_blocked_roads.length > 0 && (
+                  <p className="text-[11px] text-amber-400">
+                    <strong>Radial Blocked Edges:</strong> {routeData.resolved_blocked_roads.map((r: any) => `${r[0]}➔${r[1]}`).join(', ')}
+                  </p>
+                )}
                 {diversionText && (
                   <div className="pt-2 border-t border-slate-800/80">
                     <p className="text-police-gold font-bold">Tactical Diversion:</p>
@@ -238,6 +297,20 @@ export default function DiversionRecommendation() {
               <Polyline 
                 positions={emergencyRouteCoords} 
                 pathOptions={{ color: '#10b981', weight: 6, opacity: 0.95 }} 
+              />
+            )}
+
+            {/* Draw Simulated Incident Circle */}
+            {activeIncidentCoord && (
+              <Circle
+                center={activeIncidentCoord}
+                radius={incidentRadius}
+                pathOptions={{ 
+                  color: '#ef4444', 
+                  fillColor: '#ef4444', 
+                  fillOpacity: 0.15, 
+                  weight: 2 
+                }}
               />
             )}
           </MapContainer>

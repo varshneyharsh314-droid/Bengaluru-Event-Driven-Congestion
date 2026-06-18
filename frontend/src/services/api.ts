@@ -113,7 +113,59 @@ export const trafficApi = {
   executeRetraining: async () => {
     const response = await api.post('/traffic/execute-retraining');
     return response.data;
+  },
+
+  analyzeVideo: async (payload: {
+    event_id: string;
+    base_congestion: string;
+    priority: string;
+    requires_road_closure: boolean;
+    sample_every?: number;
+    file: File;
+  }) => {
+    const formData = new FormData();
+    formData.append('event_id', payload.event_id);
+    formData.append('base_congestion', payload.base_congestion);
+    formData.append('priority', payload.priority);
+    formData.append('requires_road_closure', String(payload.requires_road_closure));
+    formData.append('sample_every', String(payload.sample_every || 3));
+    formData.append('file', payload.file);
+
+    const response = await api.post('/traffic/analyze-video', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000, // 5 min timeout for large videos
+    });
+    return response.data;
   }
 };
+
+/**
+ * Opens a WebSocket connection for real-time video analysis streaming.
+ * Send a video file as binary, receive per-frame results as JSON.
+ */
+export function connectVideoWs(onMessage: (data: any) => void, onClose?: () => void, onError?: (err: Event) => void) {
+  const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/video-analysis`;
+  const socket = new WebSocket(wsUrl);
+
+  socket.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      onMessage(payload);
+    } catch (e) {
+      console.error("WS video parse error:", e);
+    }
+  };
+
+  socket.onclose = () => {
+    if (onClose) onClose();
+  };
+
+  socket.onerror = (err) => {
+    console.error("WS video error:", err);
+    if (onError) onError(err);
+  };
+
+  return socket;
+}
 
 export default api;

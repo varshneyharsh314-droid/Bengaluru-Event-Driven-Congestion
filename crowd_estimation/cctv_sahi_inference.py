@@ -5,10 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ultralytics import YOLO
 
-# Import SAHI core components
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
-from sahi.utils.cv import read_image
 
 def run_comparison(image_path, model_weights="yolov8n.pt", confidence_threshold=0.25, out_plot_path="benchmark_results/sahi_comparison.png"):
     """Compares standard YOLOv8 inference with SAHI-sliced inference for CCTV crowd estimation."""
@@ -47,11 +45,16 @@ def run_comparison(image_path, model_weights="yolov8n.pt", confidence_threshold=
     standard_boxes = standard_results.boxes.xyxy.cpu().numpy()
     standard_count = len(standard_boxes)
 
-    # Draw Standard Bounding Boxes (Red)
+    # Draw Standard Bounding Boxes (Red for verified persons)
     img_standard = img_rgb.copy()
     for box in standard_boxes:
         x1, y1, x2, y2 = map(int, box[:4])
         cv2.rectangle(img_standard, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        label = "VERIFIED"
+        (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
+        cv2.rectangle(img_standard, (x1, max(y1 - text_h - 6, 0)), (x1 + text_w + 4, max(y1, text_h + 6)), (255, 0, 0), -1)
+        cv2.putText(img_standard, label, (x1 + 2, max(y1 - 4, text_h + 2)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
 
     # =========================================================================
     # PHASE 2: SAHI Sliced Inference
@@ -76,12 +79,17 @@ def run_comparison(image_path, model_weights="yolov8n.pt", confidence_threshold=
     ]
     sahi_count = len(sahi_objects)
 
-    # Draw SAHI Bounding Boxes (Green)
+    # Draw SAHI Bounding Boxes (Red for verified persons)
     img_sahi = img_rgb.copy()
     for obj in sahi_objects:
         bbox = obj.bbox.to_voc_bbox()  # Returns [xmin, ymin, xmax, ymax]
         x1, y1, x2, y2 = map(int, bbox)
-        cv2.rectangle(img_sahi, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.rectangle(img_sahi, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        label = "VERIFIED"
+        (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
+        cv2.rectangle(img_sahi, (x1, max(y1 - text_h - 6, 0)), (x1 + text_w + 4, max(y1, text_h + 6)), (255, 0, 0), -1)
+        cv2.putText(img_sahi, label, (x1 + 2, max(y1 - 4, text_h + 2)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
 
     # =========================================================================
     # PHASE 3: Metrics Evaluation & Plotting

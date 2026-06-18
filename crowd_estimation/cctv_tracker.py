@@ -97,11 +97,13 @@ class CCTVPedestrianTracker:
                         unique_track_ids.add(track_id)
                         current_frame_count += 1
                         
-                        # Draw tight bounding boxes & ID labels (Green for verified tracking)
-                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        label = f"ID:{track_id} ({score:.2f})"
-                        cv2.putText(annotated_frame, label, (x1, max(y1 - 5, 12)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+                        # Draw tight bounding boxes & ID labels (Red for verified person tracking)
+                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                        label = f"VERIFIED ID:{track_id} ({score:.2f})"
+                        (text_w, text_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+                        cv2.rectangle(annotated_frame, (x1, max(y1 - text_h - 6, 0)), (x1 + text_w + 4, max(y1, text_h + 6)), (0, 0, 255), -1)
+                        cv2.putText(annotated_frame, label, (x1 + 2, max(y1 - 4, text_h + 2)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
                 else:
                     # Fallback to standard detections if no tracks are active
                     xyxy_boxes = boxes.xyxy.int().cpu().tolist()
@@ -113,7 +115,7 @@ class CCTVPedestrianTracker:
                         if box_w < min_box_size[0] or box_h < min_box_size[1]:
                             continue
                         current_frame_count += 1
-                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 200, 255), 2)
             
             frame_counts.append(current_frame_count)
             

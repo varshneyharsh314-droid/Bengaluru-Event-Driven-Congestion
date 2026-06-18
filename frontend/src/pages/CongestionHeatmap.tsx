@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import { trafficApi } from '../services/api';
 import { Siren, ShieldAlert, Sparkles, MapPin, CheckCircle, RefreshCw } from 'lucide-react';
@@ -34,6 +34,7 @@ export default function CongestionHeatmap() {
   const [duration, setDuration] = useState(2.5);
   const [zone, setZone] = useState('Central Zone 2');
   const [junction, setJunction] = useState('SilkBoardJunc');
+  const [description, setDescription] = useState('severe accident and heavy traffic at junction');
   
   const [prediction, setPrediction] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
@@ -67,7 +68,8 @@ export default function CongestionHeatmap() {
         zone: zone,
         junction: junction,
         latitude: coord[0],
-        longitude: coord[1]
+        longitude: coord[1],
+        description: description
       };
       
       const result = await trafficApi.predictCongestion(payload);
@@ -205,6 +207,17 @@ export default function CongestionHeatmap() {
               </div>
             </div>
 
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Description / NLP Keyword Inputs</label>
+              <textarea 
+                value={description} 
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="e.g. severe water logging and accident near Agara Junction..."
+                rows={2}
+                className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none resize-none"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -249,12 +262,24 @@ export default function CongestionHeatmap() {
 
               <div className="grid grid-cols-2 gap-4 border-t border-slate-800/80 pt-4">
                 <div className="bg-slate-900/40 p-3 rounded border border-slate-800">
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Delay minutes</span>
-                  <span className="text-lg font-extrabold text-slate-200">{prediction.predicted_delay_min} mins</span>
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Delay Minutes</span>
+                  <span className="text-sm font-extrabold text-slate-200">{prediction.predicted_delay_min} mins</span>
+                </div>
+                <div className="bg-slate-900/40 p-3 rounded border border-slate-800">
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">XGBoost Pred Duration</span>
+                  <span className="text-sm font-extrabold text-slate-200">{prediction.predicted_duration_minutes ? `${prediction.predicted_duration_minutes.toFixed(1)} mins` : 'N/A'}</span>
+                </div>
+                <div className="bg-slate-900/40 p-3 rounded border border-slate-800">
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">XGBoost Pred Radius</span>
+                  <span className="text-sm font-extrabold text-slate-200">{prediction.predicted_impact_radius_meters ? `${prediction.predicted_impact_radius_meters.toFixed(1)} meters` : 'N/A'}</span>
                 </div>
                 <div className="bg-slate-900/40 p-3 rounded border border-slate-800">
                   <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Police / Barricades</span>
-                  <span className="text-lg font-extrabold text-slate-200">{prediction.resources.police_officers} / {prediction.resources.barricades}</span>
+                  <span className="text-sm font-extrabold text-slate-200">{prediction.resources.police_officers} / {prediction.resources.barricades}</span>
+                </div>
+                <div className="bg-slate-900/40 p-3 rounded border border-slate-800 col-span-2">
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">VMS Warning Boards Required</span>
+                  <span className="text-sm font-extrabold text-police-gold">{prediction.resources.vms_boards !== undefined ? `${prediction.resources.vms_boards} Boards` : '0 Boards'}</span>
                 </div>
               </div>
             </div>
@@ -284,7 +309,8 @@ export default function CongestionHeatmap() {
                       {isActive && prediction && (
                         <div className="mt-2 pt-2 border-t border-slate-200">
                           <p className="text-xs"><strong>Severity:</strong> {prediction.predicted_congestion}</p>
-                          <p className="text-xs"><strong>Delay:</strong> {prediction.predicted_delay_min} mins</p>
+                          <p className="text-xs"><strong>Predicted Duration:</strong> {prediction.predicted_duration_minutes?.toFixed(1)} mins</p>
+                          <p className="text-xs"><strong>Impact Radius:</strong> {prediction.predicted_impact_radius_meters?.toFixed(1)} meters</p>
                         </div>
                       )}
                     </div>
@@ -292,9 +318,24 @@ export default function CongestionHeatmap() {
                 </Marker>
               );
             })}
+
+            {/* Draw Red Impact Circle representing predicted impact radius */}
+            {prediction && prediction.predicted_impact_radius_meters && (
+              <Circle
+                center={activeCoord}
+                radius={prediction.predicted_impact_radius_meters}
+                pathOptions={{ 
+                  color: '#ef4444', 
+                  fillColor: '#ef4444', 
+                  fillOpacity: 0.15, 
+                  weight: 2 
+                }}
+              />
+            )}
           </MapContainer>
         </div>
       </div>
     </div>
   );
 }
+

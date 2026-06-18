@@ -41,6 +41,96 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
 
+@app.websocket("/api/traffic/ws/video-analysis")
+async def websocket_video_analysis(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time video frame analysis.
+    Client sends video file as binary, server streams back per-frame results.
+    """
+    import tempfile
+    import os
+    import base64
+    import asyncio
+    import threading
+    import concurrent.futures
+    from app.services.crowd_service import crowd_service
+
+    await websocket.accept()
+    tmp_path = None
+    stop_event = threading.Event()
+    
+    try:
+        # Receive video binary from client
+        video_bytes = await websocket.receive_bytes()
+
+        # Save to temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            tmp.write(video_bytes)
+            tmp_path = tmp.name
+
+        loop = asyncio.get_running_loop()
+        queue = asyncio.Queue()
+
+        def producer():
+            try:
+                for result in crowd_service.process_video_frames(
+                    tmp_path, sample_every=-1, pace_fps=True, render_frames=True
+                ):
+                    if stop_event.is_set():
+                        break
+                    loop.call_soon_threadsafe(queue.put_nowait, result)
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait, e)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        # Start producer in a background thread
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(producer)
+
+        try:
+            while True:
+                result = await queue.get()
+                if result is None:
+                    break
+                if isinstance(result, Exception):
+                    raise result
+
+                payload = {
+                    "event": "VIDEO_FRAME" if not result["is_last"] else "VIDEO_COMPLETE",
+                    "frame_idx": result["frame_idx"],
+                    "total_frames": result["total_frames"],
+                    "headcount": result["headcount"],
+                    "density": result["density"],
+                    "fps": result["fps"],
+                    "is_last": result["is_last"],
+                }
+
+                # Include annotated frame as base64 (only on sample frames)
+                if result["annotated_frame_bytes"] is not None:
+                    payload["annotated_frame_base64"] = base64.b64encode(
+                        result["annotated_frame_bytes"]
+                    ).decode("utf-8")
+
+                # Include summary on last message
+                if result["is_last"] and "summary" in result:
+                    payload["summary"] = result["summary"]
+
+                await websocket.send_json(payload)
+        finally:
+            stop_event.set()
+            executor.shutdown(wait=False)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        try:
+            await websocket.send_json({"event": "ERROR", "message": str(e)})
+        except Exception:
+            pass
+
 @app.on_event("startup")
 def startup_populate_data():
     """
@@ -177,4 +267,4 @@ def startup_populate_data():
         db.close()
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, ws_max_size=209715200)

@@ -28,6 +28,7 @@ class Event(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     status = Column(String, default="active")  # active, cleared, unresolved
+    description = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -46,6 +47,8 @@ class CongestionPrediction(Base):
     prob_med = Column(Float, nullable=False)
     prob_high = Column(Float, nullable=False)
     predicted_delay_min = Column(Integer, nullable=False)
+    predicted_duration_minutes = Column(Float, nullable=True)
+    predicted_impact_radius_meters = Column(Float, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
