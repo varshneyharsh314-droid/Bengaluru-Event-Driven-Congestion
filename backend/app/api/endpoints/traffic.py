@@ -562,7 +562,9 @@ def get_active_incidents(
             "delay_min": delay,
             "police_deployed": police_deployed,
             "description": ev.description,
-            "timestamp": ev.timestamp.isoformat() if ev.timestamp else None
+            "timestamp": ev.timestamp.isoformat() if ev.timestamp else None,
+            "latitude": ev.latitude,
+            "longitude": ev.longitude
         })
     return results
 
