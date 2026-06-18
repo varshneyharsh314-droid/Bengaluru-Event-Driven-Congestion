@@ -136,6 +136,21 @@ export const trafficApi = {
       timeout: 300000, // 5 min timeout for large videos
     });
     return response.data;
+  },
+
+  getJunctions: async () => {
+    const response = await api.get('/traffic/junctions');
+    return response.data;
+  },
+
+  getDynamicRoute: async (payload: {
+    source: string;
+    target: string;
+    algorithm: string;
+    congestion_inputs: Array<{ source: string; target: string; headcount: number }>;
+  }) => {
+    const response = await api.post('/traffic/dynamic-routing', payload);
+    return response.data;
   }
 };
 

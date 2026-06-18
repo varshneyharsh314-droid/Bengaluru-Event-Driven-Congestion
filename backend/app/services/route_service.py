@@ -188,4 +188,124 @@ class RouteService:
             "resolved_blocked_roads": resolved_blocked_roads
         }
 
+    def find_dynamic_route(
+        self,
+        source: str,
+        target: str,
+        congestion_inputs: List[Dict[str, Any]],
+        algorithm: str = "astar"
+    ) -> Dict[str, Any]:
+        """
+        Dynamically computes the shortest path on the road graph, applying
+        custom headcount-based edge weight multipliers for active camera simulations.
+        """
+        if source not in self.G or target not in self.G:
+            return {"error": f"Junction {source} or {target} not recognized in Bengaluru graph."}
+
+        # Clone graph to avoid polluting base weights
+        congested_G = self.G.copy()
+
+        # Build lookup for input headcounts
+        headcounts_map = {}
+        for item in congestion_inputs:
+            src = item.get("source")
+            dst = item.get("target")
+            hc = item.get("headcount", 0)
+            if src and dst:
+                headcounts_map[(src, dst)] = hc
+
+        # Apply multiplier to weights
+        # - headcount <= 10: x1.0
+        # - headcount <= 30: x2.0
+        # - headcount <= 60: x4.0
+        # - headcount > 60: x10.0 (Extreme/Blocked)
+        for u, v, data in congested_G.edges(data=True):
+            hc = headcounts_map.get((u, v), 0)
+            
+            # Double check undirected or bi-directional matches
+            if (u, v) not in headcounts_map and (v, u) in headcounts_map:
+                hc = headcounts_map[(v, u)]
+
+            if hc <= 10:
+                mult = 1.0
+            elif hc <= 30:
+                mult = 2.0
+            elif hc <= 60:
+                mult = 4.0
+            else:
+                mult = 10.0
+                
+            data['weight'] = data['base_weight'] * mult
+            data['headcount'] = hc
+            
+            # Label density category
+            if hc <= 10:
+                data['congestion_level'] = 'Low'
+            elif hc <= 30:
+                data['congestion_level'] = 'Medium'
+            elif hc <= 60:
+                data['congestion_level'] = 'High'
+            else:
+                data['congestion_level'] = 'Extreme'
+
+        # Baseline path under standard conditions (no congestion)
+        try:
+            normal_route = nx.dijkstra_path(self.G, source, target, weight='weight')
+            base_normal_time = self.get_path_weight(self.G, normal_route)
+        except nx.NetworkXNoPath:
+            return {"error": f"No path exists between {source} and {target}."}
+
+        # Calculate optimal path under dynamic congestion conditions
+        try:
+            if algorithm.lower() == 'astar':
+                optimal_route = nx.astar_path(
+                    congested_G, 
+                    source, 
+                    target, 
+                    heuristic=self.astar_heuristic, 
+                    weight='weight'
+                )
+            else:
+                optimal_route = nx.dijkstra_path(congested_G, source, target, weight='weight')
+                
+            estimated_time = self.get_path_weight(congested_G, optimal_route)
+        except nx.NetworkXNoPath:
+            return {
+                "optimal_route": [],
+                "estimated_travel_time": 999.0,
+                "baseline_travel_time": float(base_normal_time),
+                "edges_state": self._get_edges_state(congested_G),
+                "status": "gridlock"
+            }
+
+        # Determine status: Gridlock is triggered if travel time is >= 3x base travel time
+        # or if all routes are heavily congested (estimated_time >= base_normal_time * 3.0)
+        status = "optimal"
+        if len(optimal_route) > 0:
+            if estimated_time >= base_normal_time * 3.0:
+                status = "gridlock"
+            elif estimated_time > base_normal_time * 1.2:
+                status = "congested"
+
+        return {
+            "optimal_route": optimal_route,
+            "estimated_travel_time": float(estimated_time),
+            "baseline_travel_time": float(base_normal_time),
+            "edges_state": self._get_edges_state(congested_G),
+            "status": status
+        }
+
+    def _get_edges_state(self, graph: nx.DiGraph) -> List[Dict[str, Any]]:
+        states = []
+        for u, v, data in graph.edges(data=True):
+            states.append({
+                "source": u,
+                "target": v,
+                "weight": float(data["weight"]),
+                "base_weight": float(data["base_weight"]),
+                "headcount": int(data.get("headcount", 0)),
+                "congestion_level": data.get("congestion_level", "Low")
+            })
+        return states
+
 route_service = RouteService()

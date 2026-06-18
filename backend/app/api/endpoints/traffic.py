@@ -491,3 +491,44 @@ def execute_retraining(
         
     background_tasks.add_task(run_training_dummy)
     return stats
+
+@router.get("/junctions")
+def get_junctions(
+    current_user: models.User = Depends(deps.get_current_user)
+):
+    """
+    Returns lists of nodes (junctions) and edges (connecting road links) in the graph
+    so the client can build selection dropdowns and visualize the graph network.
+    """
+    return {
+        "junctions": route_service.get_junctions(),
+        "edges": route_service.get_edges()
+    }
+
+@router.post("/dynamic-routing", response_model=schemas.DynamicRoutingResponse)
+def get_dynamic_route(
+    req: schemas.DynamicRoutingRequest,
+    current_user: models.User = Depends(deps.get_current_user)
+):
+    """
+    Computes optimal path and travel times based on client-supplied
+    multi-camera junction mappings and analyzed headcount inputs.
+    """
+    congestion_inputs_list = [item.model_dump() for item in req.congestion_inputs]
+    result = route_service.find_dynamic_route(
+        source=req.source,
+        target=req.target,
+        congestion_inputs=congestion_inputs_list,
+        algorithm=req.algorithm
+    )
+    
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+        
+    return schemas.DynamicRoutingResponse(
+        optimal_route=result["optimal_route"],
+        estimated_travel_time=result["estimated_travel_time"],
+        baseline_travel_time=result["baseline_travel_time"],
+        edges_state=result["edges_state"],
+        status=result["status"]
+    )

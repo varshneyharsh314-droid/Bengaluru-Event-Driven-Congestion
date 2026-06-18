@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { trafficApi, connectVideoWs } from '../services/api';
 import { Users, AlertTriangle, ShieldCheck, Siren, Upload, RefreshCw, Film, Video, Image, BarChart3, TrendingUp, Activity } from 'lucide-react';
 
-type AnalysisMode = 'image' | 'video';
+type AnalysisMode = 'image' | 'video' | 'simulation';
 
 interface VideoStreamState {
   isStreaming: boolean;
@@ -91,7 +91,338 @@ export default function CrowdIntelligence() {
   const [baseCongestion, setBaseCongestion] = useState('Medium');
   const [priority, setPriority] = useState('High');
   const [closure, setClosure] = useState(true);
-  
+
+  // Simulation mode state
+  interface SimCamera {
+    id: number;
+    fromJunction: string;
+    toJunction: string;
+    headcount: number;
+    videoFile: File | null;
+    videoPreviewUrl: string | null;
+    isStreaming: boolean;
+    currentFrame: string | null;
+    frameIdx: number;
+    totalFrames: number;
+    ws: WebSocket | null;
+  }
+
+  const [junctionList, setJunctionList] = useState<any[]>([]);
+  const [edgesList, setEdgesList] = useState<any[]>([]);
+  const [simSource, setSimSource] = useState('SilkBoardJunc');
+  const [simTarget, setSimTarget] = useState('AgaraJunction');
+  const [simAlgorithm, setSimAlgorithm] = useState('astar');
+  const [routingResult, setRoutingResult] = useState<any | null>(null);
+
+  const [simCameras, setSimCameras] = useState<SimCamera[]>([
+    { id: 1, fromJunction: 'SilkBoardJunc', toJunction: 'HSRLayout14thMain', headcount: 0, videoFile: null, videoPreviewUrl: null, isStreaming: false, currentFrame: null, frameIdx: 0, totalFrames: 0, ws: null },
+    { id: 2, fromJunction: 'HSRLayout14thMain', toJunction: 'AgaraJunction', headcount: 0, videoFile: null, videoPreviewUrl: null, isStreaming: false, currentFrame: null, frameIdx: 0, totalFrames: 0, ws: null },
+    { id: 3, fromJunction: 'SilkBoardJunc', toJunction: 'MadiwalaCheckpost', headcount: 0, videoFile: null, videoPreviewUrl: null, isStreaming: false, currentFrame: null, frameIdx: 0, totalFrames: 0, ws: null },
+    { id: 4, fromJunction: 'MadiwalaCheckpost', toJunction: 'KoramangalaWaterTank', headcount: 0, videoFile: null, videoPreviewUrl: null, isStreaming: false, currentFrame: null, frameIdx: 0, totalFrames: 0, ws: null },
+    { id: 5, fromJunction: 'KoramangalaWaterTank', toJunction: 'AgaraJunction', headcount: 0, videoFile: null, videoPreviewUrl: null, isStreaming: false, currentFrame: null, frameIdx: 0, totalFrames: 0, ws: null },
+  ]);
+
+  // Load junction/edges catalog when mode is 'simulation'
+  useEffect(() => {
+    if (mode !== 'simulation') return;
+    const loadJunctions = async () => {
+      try {
+        const res = await trafficApi.getJunctions();
+        setJunctionList(res.junctions || []);
+        setEdgesList(res.edges || []);
+      } catch (err) {
+        console.error("Failed to load junctions:", err);
+      }
+    };
+    loadJunctions();
+  }, [mode]);
+
+  // Map lat/lon coordinates to 2D canvas coordinates
+  const latMin = 12.9100;
+  const latMax = 12.9380;
+  const lonMin = 77.6000;
+  const lonMax = 77.6850;
+
+  const projectCoords = (lat: number, lon: number, width: number, height: number) => {
+    const pad = 40;
+    const x = pad + ((lon - lonMin) / (lonMax - lonMin)) * (width - pad * 2);
+    const y = height - pad - ((lat - latMin) / (latMax - latMin)) * (height - pad * 2);
+    return { x, y };
+  };
+
+  const getConnectedJunctions = (fromNode: string) => {
+    if (!fromNode) return [];
+    const connected = edgesList
+      .filter(e => e.source === fromNode)
+      .map(e => e.target);
+    return Array.from(new Set(connected));
+  };
+
+  const recalculateRoute = useCallback(async () => {
+    if (!simSource || !simTarget) return;
+    try {
+      const congestion_inputs = simCameras
+        .filter(cam => cam.fromJunction && cam.toJunction)
+        .map(cam => ({
+          source: cam.fromJunction,
+          target: cam.toJunction,
+          headcount: cam.headcount
+        }));
+
+      const res = await trafficApi.getDynamicRoute({
+        source: simSource,
+        target: simTarget,
+        algorithm: simAlgorithm,
+        congestion_inputs
+      });
+      setRoutingResult(res);
+    } catch (err) {
+      console.error("Failed to recalculate route:", err);
+    }
+  }, [simSource, simTarget, simAlgorithm, simCameras]);
+
+  // Periodically pull fresh route updates based on simulated edge congestion weights
+  useEffect(() => {
+    if (mode !== 'simulation') return;
+    recalculateRoute();
+    const interval = setInterval(() => {
+      recalculateRoute();
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [mode, recalculateRoute]);
+
+  const startCameraWs = async (cameraId: number, file: File) => {
+    const existingCam = simCameras.find(c => c.id === cameraId);
+    if (existingCam?.ws) {
+      existingCam.ws.close();
+    }
+
+    setSimCameras(prev => prev.map(c => {
+      if (c.id === cameraId) {
+        return {
+          ...c,
+          videoFile: file,
+          videoPreviewUrl: URL.createObjectURL(file),
+          isStreaming: true,
+          currentFrame: null,
+          frameIdx: 0,
+          totalFrames: 0,
+        };
+      }
+      return c;
+    }));
+
+    const socket = connectVideoWs(
+      (data) => {
+        if (data.event === 'VIDEO_FRAME') {
+          setSimCameras(prev => prev.map(cam => {
+            if (cam.id === cameraId) {
+              return {
+                ...cam,
+                headcount: data.headcount,
+                frameIdx: data.frame_idx,
+                totalFrames: data.total_frames,
+                currentFrame: data.annotated_frame_base64
+                  ? `data:image/jpeg;base64,${data.annotated_frame_base64}`
+                  : cam.currentFrame
+              };
+            }
+            return cam;
+          }));
+        } else if (data.event === 'VIDEO_COMPLETE') {
+          setSimCameras(prev => prev.map(cam => {
+            if (cam.id === cameraId) {
+              return { ...cam, isStreaming: false, ws: null };
+            }
+            return cam;
+          }));
+        } else if (data.event === 'ERROR') {
+          console.error(`Camera ${cameraId} WS Error:`, data.message);
+          setSimCameras(prev => prev.map(cam => {
+            if (cam.id === cameraId) {
+              return { ...cam, isStreaming: false, ws: null };
+            }
+            return cam;
+          }));
+        }
+      },
+      () => {
+        setSimCameras(prev => prev.map(cam => {
+          if (cam.id === cameraId) {
+            return { ...cam, isStreaming: false, ws: null };
+          }
+          return cam;
+        }));
+      },
+      () => {
+        setSimCameras(prev => prev.map(cam => {
+          if (cam.id === cameraId) {
+            return { ...cam, isStreaming: false, ws: null };
+          }
+          return cam;
+        }));
+      }
+    );
+
+    setSimCameras(prev => prev.map(c => {
+      if (c.id === cameraId) {
+        return { ...c, ws: socket };
+      }
+      return c;
+    }));
+
+    socket.onopen = async () => {
+      const buffer = await file.arrayBuffer();
+      socket.send(buffer);
+    };
+  };
+
+  const stopCameraWs = (cameraId: number) => {
+    const cam = simCameras.find(c => c.id === cameraId);
+    if (cam?.ws) {
+      cam.ws.close();
+    }
+    setSimCameras(prev => prev.map(c => {
+      if (c.id === cameraId) {
+        return { ...c, isStreaming: false, ws: null };
+      }
+      return c;
+    }));
+  };
+
+  const updateCameraHeadcount = (cameraId: number, headcount: number) => {
+    setSimCameras(prev => prev.map(c => {
+      if (c.id === cameraId) {
+        return { ...c, headcount };
+      }
+      return c;
+    }));
+  };
+
+  const handleCameraVideoUpload = (cameraId: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      startCameraWs(cameraId, e.target.files[0]);
+    }
+  };
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || junctionList.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+
+    // Dark background matching the glass-panel theme
+    ctx.fillStyle = '#050B14';
+    ctx.fillRect(0, 0, width, height);
+
+    // Map node coordinates
+    const nodeCoords: Record<string, { x: number; y: number }> = {};
+    junctionList.forEach(node => {
+      nodeCoords[node.name] = projectCoords(node.lat, node.lon, width, height);
+    });
+
+    // Determine current edges state from routing results
+    const edgesToDraw = routingResult?.edges_state || edgesList.map(e => ({
+      source: e.source,
+      target: e.target,
+      congestion_level: 'Low'
+    }));
+
+    // Draw all road edges
+    edgesToDraw.forEach((edge: any) => {
+      const u = nodeCoords[edge.source];
+      const v = nodeCoords[edge.target];
+      if (!u || !v) return;
+
+      // Color based on congestion
+      let edgeColor = '#10b981'; // Green (Low)
+      if (edge.congestion_level === 'Medium') edgeColor = '#f59e0b'; // Yellow
+      if (edge.congestion_level === 'High') edgeColor = '#ef4444'; // Red
+      if (edge.congestion_level === 'Extreme') edgeColor = '#7f1d1d'; // Dark Red (Gridlock)
+
+      ctx.beginPath();
+      ctx.moveTo(u.x, u.y);
+      ctx.lineTo(v.x, v.y);
+      ctx.strokeStyle = edgeColor;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    });
+
+    // Draw optimal route highlight (glowing path)
+    const optimalRoute = routingResult?.optimal_route || [];
+    if (optimalRoute.length > 1) {
+      ctx.beginPath();
+      for (let i = 0; i < optimalRoute.length; i++) {
+        const coords = nodeCoords[optimalRoute[i]];
+        if (coords) {
+          if (i === 0) ctx.moveTo(coords.x, coords.y);
+          else ctx.lineTo(coords.x, coords.y);
+        }
+      }
+      ctx.strokeStyle = '#00ffff'; // Neon cyan highlight
+      ctx.lineWidth = 5;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = '#00ffff';
+      ctx.stroke();
+      
+      // Reset shadow for subsequent drawings
+      ctx.shadowBlur = 0;
+    }
+
+    // Draw junction nodes (circles)
+    junctionList.forEach(node => {
+      const coords = nodeCoords[node.name];
+      if (!coords) return;
+
+      const isStart = node.name === simSource;
+      const isEnd = node.name === simTarget;
+      const isOnPath = optimalRoute.includes(node.name);
+
+      ctx.beginPath();
+      ctx.arc(coords.x, coords.y, 7, 0, Math.PI * 2);
+      
+      if (isStart) {
+        ctx.fillStyle = '#dcba55'; // Gold for source
+      } else if (isEnd) {
+        ctx.fillStyle = '#ef4444'; // Red for destination
+      } else if (isOnPath) {
+        ctx.fillStyle = '#00ffff'; // Cyan if on calculated path
+      } else {
+        ctx.fillStyle = '#334155'; // Grey for others
+      }
+      ctx.fill();
+
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'center';
+      
+      // Shorten label for cleaner visual representation
+      const cleanName = node.name
+        .replace('Junc', '')
+        .replace('Junction', '')
+        .replace('Layout', '')
+        .replace('Checkpost', '')
+        .replace('WaterTank', '');
+        
+      ctx.fillText(cleanName, coords.x, coords.y - 10);
+    });
+  }, [junctionList, edgesList, routingResult, simSource, simTarget]);
+
   // Image mode state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -334,6 +665,17 @@ export default function CrowdIntelligence() {
           <Video className="w-4 h-4" />
           <span>Video Analysis</span>
         </button>
+        <button
+          onClick={() => setMode('simulation')}
+          className={`flex items-center space-x-2 px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all duration-200 border ${
+            mode === 'simulation'
+              ? 'bg-police-gold text-[#0B132B] border-police-gold shadow-md shadow-police-gold/20'
+              : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+          }`}
+        >
+          <Activity className="w-4 h-4" />
+          <span>Dynamic Routing Simulator</span>
+        </button>
       </div>
 
       {/* Preset Camera feeds — Image mode only */}
@@ -353,131 +695,437 @@ export default function CrowdIntelligence() {
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-        {/* Left Side: Operational Setup Panel */}
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6">
-          <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3">Operational Setup</h3>
-          
-          <form onSubmit={mode === 'image' ? handleImageSubmit : (e) => { e.preventDefault(); handleVideoAnalysis(); }} className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Event Association</label>
-              <input 
-                type="text" 
-                value={eventId}
-                onChange={(e) => setEventId(e.target.value)}
-                className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+        {/* Left Side: Operational Panel */}
+        {mode === 'simulation' ? (
+          /* Simulation Control Panel */
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6">
+            <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3 flex items-center space-x-2">
+              <Activity className="w-4 h-4 text-police-gold" />
+              <span>Simulation Router</span>
+            </h3>
+            
+            <div className="space-y-4">
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Base Congestion</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Start Junction</label>
                 <select 
-                  value={baseCongestion}
-                  onChange={(e) => setBaseCongestion(e.target.value)}
+                  value={simSource}
+                  onChange={(e) => setSimSource(e.target.value)}
                   className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
                 >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
+                  {junctionList.map(j => (
+                    <option key={j.name} value={j.name}>{j.name}</option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Priority</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Destination Junction</label>
                 <select 
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value)}
+                  value={simTarget}
+                  onChange={(e) => setSimTarget(e.target.value)}
                   className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
                 >
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
+                  {junctionList.map(j => (
+                    <option key={j.name} value={j.name}>{j.name}</option>
+                  ))}
                 </select>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Requires Closure</label>
-              <select 
-                value={String(closure)}
-                onChange={(e) => setClosure(e.target.value === 'true')}
-                className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
-              >
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            </div>
-
-            {/* File Upload Area */}
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">
-                {mode === 'image' ? 'Upload Camera Frame' : 'Upload CCTV Video'}
-              </label>
-              <div 
-                onClick={() => mode === 'image' ? fileInputRef.current?.click() : videoInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-800 hover:border-police-gold/50 rounded-xl p-8 text-center cursor-pointer bg-slate-900/20 hover:bg-slate-900/40 transition-all duration-200"
-              >
-                {mode === 'image' ? (
-                  <>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef}
-                      onChange={handleFileChange}
-                      accept="image/*"
-                      className="hidden" 
-                    />
-                    <Upload className="w-8 h-8 text-slate-500 mx-auto mb-3" />
-                    <p className="text-xs text-slate-300 font-semibold mb-1">Click to select CCTV image</p>
-                    <p className="text-[10px] text-slate-500">Supports PNG, JPG, JPEG up to 10MB</p>
-                  </>
-                ) : (
-                  <>
-                    <input 
-                      type="file" 
-                      ref={videoInputRef}
-                      onChange={handleVideoChange}
-                      accept="video/*"
-                      className="hidden" 
-                    />
-                    <Video className="w-8 h-8 text-slate-500 mx-auto mb-3" />
-                    <p className="text-xs text-slate-300 font-semibold mb-1">Click to select CCTV video</p>
-                    <p className="text-[10px] text-slate-500">Supports MP4, AVI, MOV up to 100MB</p>
-                  </>
-                )}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Routing Algorithm</label>
+                <select 
+                  value={simAlgorithm}
+                  onChange={(e) => setSimAlgorithm(e.target.value)}
+                  className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                >
+                  <option value="astar">A* Search Algorithm</option>
+                  <option value="dijkstra">Dijkstra's Shortest Path</option>
+                </select>
               </div>
-            </div>
 
-            {/* Selected file info */}
-            {mode === 'image' && selectedFile && (
-              <div className="text-xs text-slate-400 truncate font-semibold bg-slate-800/40 p-2.5 rounded border border-slate-700/30 flex items-center justify-between">
-                <span>Selected: {selectedFile.name}</span>
-                <span className="text-[10px] bg-police-gold/15 text-police-gold px-1.5 py-0.5 rounded border border-police-gold/20">Ready</span>
-              </div>
-            )}
-            {mode === 'video' && videoFile && (
-              <div className="text-xs text-slate-400 truncate font-semibold bg-slate-800/40 p-2.5 rounded border border-slate-700/30 flex items-center justify-between">
-                <span>Video: {videoFile.name} ({(videoFile.size / (1024 * 1024)).toFixed(1)} MB)</span>
-                <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20">Ready</span>
-              </div>
-            )}
+              {routingResult && (
+                <div className="border-t border-slate-800 pt-4 space-y-4">
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <span className="text-slate-400 uppercase text-[10px] font-bold">Base Time:</span>
+                    <span className="text-emerald-400 font-bold">{routingResult.baseline_travel_time?.toFixed(1)} mins</span>
+                  </div>
 
-            <button
-              type="submit"
-              disabled={loading || (mode === 'image' ? !selectedFile : !videoFile)}
-              className="w-full py-3 bg-police-gold hover:bg-police-gold/90 text-[#0B132B] font-bold text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center justify-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <RefreshCw className="w-4.5 h-4.5 animate-spin" />
-              ) : (
-                <span>{mode === 'image' ? 'Start SAHI Calibration' : 'Start Video Headcount'}</span>
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <span className="text-slate-400 uppercase text-[10px] font-bold">Simulated Time:</span>
+                    <span className={`font-black text-sm ${
+                      routingResult.status === 'gridlock' ? 'text-police-red animate-pulse' :
+                      routingResult.status === 'congested' ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {routingResult.estimated_travel_time?.toFixed(1)} mins
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <span className="text-slate-400 uppercase text-[10px] font-bold">Routing Status:</span>
+                    <span className={`text-[10px] uppercase px-2 py-0.5 rounded font-bold border ${
+                      routingResult.status === 'gridlock'
+                        ? 'bg-red-500/15 text-red-400 border-red-500/20'
+                        : routingResult.status === 'congested'
+                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/20'
+                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+                    }`}>
+                      {routingResult.status}
+                    </span>
+                  </div>
+
+                  {routingResult.status === 'gridlock' && (
+                    <div className="p-3.5 bg-red-950/40 rounded border border-red-500/35 text-red-300 space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <AlertTriangle className="w-4 h-4 text-red-400" />
+                        <span className="text-xs font-bold uppercase tracking-wider">Gridlock Warning!</span>
+                      </div>
+                      <p className="text-[10px] text-red-400 leading-relaxed font-semibold">
+                        ⚠️ GRIDLOCK ALERT: No clear alternative route. Both paths heavily congested.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Calculated path sequence list */}
+                  <div className="space-y-2">
+                    <span className="block text-[10px] font-bold text-slate-400 uppercase">Computed Path Sequence</span>
+                    <div className="bg-[#050B14] p-3 rounded-lg border border-slate-800 max-h-[160px] overflow-y-auto space-y-1.5 scrollbar-thin">
+                      {routingResult.optimal_route?.length > 0 ? (
+                        routingResult.optimal_route.map((node: string, index: number) => (
+                          <div key={node} className="flex items-center space-x-2 text-[10px] font-semibold text-slate-300">
+                            <span className="w-4 h-4 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[8px]">
+                              {index + 1}
+                            </span>
+                            <span className="truncate">{node}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <span className="text-[10px] text-red-400 italic">No route reachable</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
               )}
-            </button>
-          </form>
-        </div>
+            </div>
+          </div>
+        ) : (
+          /* Left Side: Operational Setup Panel */
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6">
+            <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3">Operational Setup</h3>
+            
+            <form onSubmit={mode === 'image' ? handleImageSubmit : (e) => { e.preventDefault(); handleVideoAnalysis(); }} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Event Association</label>
+                <input 
+                  type="text" 
+                  value={eventId}
+                  onChange={(e) => setEventId(e.target.value)}
+                  className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Base Congestion</label>
+                  <select 
+                    value={baseCongestion}
+                    onChange={(e) => setBaseCongestion(e.target.value)}
+                    className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Priority</label>
+                  <select 
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value)}
+                    className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                  >
+                    <option value="High">High</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Low">Low</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Requires Closure</label>
+                <select 
+                  value={String(closure)}
+                  onChange={(e) => setClosure(e.target.value === 'true')}
+                  className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                >
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+
+              {/* File Upload Area */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">
+                  {mode === 'image' ? 'Upload Camera Frame' : 'Upload CCTV Video'}
+                </label>
+                <div 
+                  onClick={() => mode === 'image' ? fileInputRef.current?.click() : videoInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-800 hover:border-police-gold/50 rounded-xl p-8 text-center cursor-pointer bg-slate-900/20 hover:bg-slate-900/40 transition-all duration-200"
+                >
+                  {mode === 'image' ? (
+                    <>
+                      <input 
+                        type="file" 
+                        ref={fileInputRef}
+                        onChange={handleFileChange}
+                        accept="image/*"
+                        className="hidden" 
+                      />
+                      <Upload className="w-8 h-8 text-slate-500 mx-auto mb-3" />
+                      <p className="text-xs text-slate-300 font-semibold mb-1">Click to select CCTV image</p>
+                      <p className="text-[10px] text-slate-500">Supports PNG, JPG, JPEG up to 10MB</p>
+                    </>
+                  ) : (
+                    <>
+                      <input 
+                        type="file" 
+                        ref={videoInputRef}
+                        onChange={handleVideoChange}
+                        accept="video/*"
+                        className="hidden" 
+                      />
+                      <Video className="w-8 h-8 text-slate-500 mx-auto mb-3" />
+                      <p className="text-xs text-slate-300 font-semibold mb-1">Click to select CCTV video</p>
+                      <p className="text-[10px] text-slate-500">Supports MP4, AVI, MOV up to 100MB</p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Selected file info */}
+              {mode === 'image' && selectedFile && (
+                <div className="text-xs text-slate-400 truncate font-semibold bg-slate-800/40 p-2.5 rounded border border-slate-700/30 flex items-center justify-between">
+                  <span>Selected: {selectedFile.name}</span>
+                  <span className="text-[10px] bg-police-gold/15 text-police-gold px-1.5 py-0.5 rounded border border-police-gold/20">Ready</span>
+                </div>
+              )}
+              {mode === 'video' && videoFile && (
+                <div className="text-xs text-slate-400 truncate font-semibold bg-slate-800/40 p-2.5 rounded border border-slate-700/30 flex items-center justify-between">
+                  <span>Video: {videoFile.name} ({(videoFile.size / (1024 * 1024)).toFixed(1)} MB)</span>
+                  <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20">Ready</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || (mode === 'image' ? !selectedFile : !videoFile)}
+                className="w-full py-3 bg-police-gold hover:bg-police-gold/90 text-[#0B132B] font-bold text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center justify-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <RefreshCw className="w-4.5 h-4.5 animate-spin" />
+                ) : (
+                  <span>{mode === 'image' ? 'Start SAHI Calibration' : 'Start Video Headcount'}</span>
+                )}
+              </button>
+            </form>
+          </div>
+        )}
 
         {/* Right Side: Visual Feed & Analytics */}
         <div className="xl:col-span-2 space-y-6">
-          
+          {/* === SIMULATION MODE CONTENT === */}
+          {mode === 'simulation' && (
+            <>
+              {/* Interactive Traffic Map Graph */}
+              <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 bg-[#0a0f1d]">
+                <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+                  <Activity className="w-4 h-4 text-[#00ffff] animate-pulse" />
+                  <span>Real-Time Bengaluru Junctions Map Graph</span>
+                </h3>
+                <div className="flex flex-col items-center bg-[#050B14] rounded-lg border border-slate-800/60 p-4">
+                  <canvas 
+                    ref={canvasRef} 
+                    width={650} 
+                    height={300} 
+                    className="w-full h-[300px] bg-[#050B14]"
+                  />
+                  
+                  {/* Graph Map Legend */}
+                  <div className="flex flex-wrap gap-4 justify-center mt-3 text-[10px] font-bold text-slate-400 select-none uppercase">
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#dcba55]"></span>
+                      <span>Start Point</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]"></span>
+                      <span>Destination</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-3.5 h-1 bg-[#00ffff] rounded"></span>
+                      <span>Optimal Path</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded bg-[#10b981]"></span>
+                      <span>Low Density</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded bg-[#f59e0b]"></span>
+                      <span>Medium Density</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded bg-[#ef4444]"></span>
+                      <span>High Density</span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className="w-2.5 h-2.5 rounded bg-[#7f1d1d]"></span>
+                      <span>Blocked / Gridlock</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Multi-Camera CCTV Grid */}
+              <div className="space-y-4">
+                <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 flex items-center space-x-2">
+                  <Video className="w-4 h-4 text-police-gold" />
+                  <span>CCTV Surveillance Camera Feeds</span>
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {simCameras.map((cam) => {
+                    const connections = getConnectedJunctions(cam.fromJunction);
+                    return (
+                      <div key={cam.id} className="glass-panel p-5 rounded-xl border border-slate-800 space-y-4 bg-[#0a0f1d] hover:border-slate-700 transition-colors">
+                        {/* Camera Header */}
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
+                          <span className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                            <span className={`w-2 h-2 rounded-full ${cam.isStreaming ? 'bg-red-500 animate-pulse' : 'bg-slate-500'}`}></span>
+                            <span>CCTV Camera {cam.id}</span>
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                            cam.headcount > 60 ? 'bg-red-500/15 text-red-400 border-red-500/20' :
+                            cam.headcount > 30 ? 'bg-amber-500/15 text-amber-400 border-amber-500/20' :
+                            cam.headcount > 10 ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/15' :
+                            'bg-emerald-500/15 text-emerald-400 border-emerald-500/20'
+                          }`}>
+                            {cam.headcount} people detected
+                          </span>
+                        </div>
+
+                        {/* Location Mapping Dropdowns */}
+                        <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
+                          <div>
+                            <label className="block text-slate-400 mb-1">From Junction</label>
+                            <select
+                              value={cam.fromJunction}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSimCameras(prev => prev.map(c => c.id === cam.id ? { ...c, fromJunction: val, toJunction: '' } : c));
+                              }}
+                              className="w-full bg-[#050B14] border border-slate-800 rounded p-1.5 text-slate-300 focus:outline-none"
+                            >
+                              <option value="">-- Select --</option>
+                              {junctionList.map(j => (
+                                <option key={j.name} value={j.name}>{j.name.replace('Junc', '').replace('Junction', '')}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-slate-400 mb-1">To Junction</label>
+                            <select
+                              value={cam.toJunction}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setSimCameras(prev => prev.map(c => c.id === cam.id ? { ...c, toJunction: val } : c));
+                              }}
+                              disabled={!cam.fromJunction}
+                              className="w-full bg-[#050B14] border border-slate-800 rounded p-1.5 text-slate-300 focus:outline-none disabled:opacity-30"
+                            >
+                              <option value="">-- Select --</option>
+                              {connections.map(targetNode => (
+                                <option key={targetNode} value={targetNode}>{targetNode.replace('Junc', '').replace('Junction', '')}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Feed Simulation Controls */}
+                        <div className="space-y-3">
+                          {cam.isStreaming ? (
+                            /* Streaming Frame View */
+                            <div className="space-y-2">
+                              <div className="h-[120px] rounded-lg bg-[#050B14] border border-slate-800/50 flex items-center justify-center overflow-hidden">
+                                {cam.currentFrame ? (
+                                  <img 
+                                    src={cam.currentFrame} 
+                                    alt={`Camera ${cam.id} visual stream`} 
+                                    className="max-h-full max-w-full object-contain"
+                                  />
+                                ) : (
+                                  <div className="text-center text-slate-600 flex flex-col items-center">
+                                    <RefreshCw className="w-5 h-5 animate-spin mb-1 text-police-gold" />
+                                    <span className="text-[8px] font-bold">Decoding stream frames...</span>
+                                  </div>
+                                )}
+                              </div>
+                              
+                              <div className="flex justify-between items-center text-[8px] font-bold text-slate-400">
+                                <span>Frame: {cam.frameIdx} / {cam.totalFrames}</span>
+                                <button 
+                                  onClick={() => stopCameraWs(cam.id)}
+                                  className="px-2 py-0.5 border border-red-500/35 text-red-400 rounded hover:bg-red-500/10 transition-colors"
+                                >
+                                  Stop
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Manual controls / upload form */
+                            <div className="space-y-3">
+                              {/* Manual Sliders */}
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-[8px] text-slate-400 font-bold">
+                                  <span>Manual Density Slider</span>
+                                  <span>{cam.headcount} persons</span>
+                                </div>
+                                <input 
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  value={cam.headcount}
+                                  onChange={(e) => updateCameraHeadcount(cam.id, Number(e.target.value))}
+                                  className="w-full accent-police-gold h-1 bg-slate-800 rounded-lg cursor-pointer appearance-none"
+                                />
+                              </div>
+
+                              {/* Upload Video Trigger */}
+                              <div>
+                                <input 
+                                  type="file" 
+                                  accept="video/*"
+                                  id={`sim-cam-file-${cam.id}`}
+                                  onChange={(e) => handleCameraVideoUpload(cam.id, e)}
+                                  className="hidden"
+                                />
+                                <label 
+                                  htmlFor={`sim-cam-file-${cam.id}`}
+                                  className="w-full py-1.5 bg-slate-900 border border-slate-800 hover:border-police-gold text-slate-300 hover:text-white rounded text-[10px] font-bold flex items-center justify-center space-x-1.5 cursor-pointer transition-all duration-200"
+                                >
+                                  <Upload className="w-3.5 h-3.5" />
+                                  <span>Simulate with Video file</span>
+                                </label>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+
           {/* === VIDEO MODE CONTENT === */}
           {mode === 'video' && (
             <>

@@ -207,3 +207,22 @@ class VideoAnalysisResponse(BaseModel):
     updated_congestion: Optional[str] = None
     police_recommended: Optional[int] = None
     barricades_recommended: Optional[int] = None
+
+# Dynamic Multi-Camera Simulator Routing Schemas
+class CongestionInput(BaseModel):
+    source: str
+    target: str
+    headcount: int
+
+class DynamicRoutingRequest(BaseModel):
+    source: str
+    target: str
+    algorithm: str = "astar"
+    congestion_inputs: List[CongestionInput] = []
+
+class DynamicRoutingResponse(BaseModel):
+    optimal_route: List[str]
+    estimated_travel_time: float
+    baseline_travel_time: float
+    edges_state: List[Dict[str, Any]]
+    status: str
