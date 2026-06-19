@@ -166,4 +166,131 @@ class AlertService:
             "payload": message
         }
 
+    def trigger_automated_dispatch(self, db, event, target_police=None, target_barricades=None):
+        """
+        Executes automatic and incremental (escalated) resource dispatch for a traffic incident.
+        Updates dispatched forces and logs alerts.
+        """
+        from app.db import models
+        from app.services.resource_service import resource_service
+        from app.core.websocket_manager import ws_manager
+        import datetime
+        import asyncio
+
+        # 1. Fetch recommended values if not explicitly provided
+        if target_police is None or target_barricades is None:
+            # Fallback based on prediction/congestion level
+            congestion_level = "Medium"
+            if event.prediction:
+                congestion_level = event.prediction.predicted_congestion
+            
+            res = resource_service.calculate_deployment(
+                congestion_level, event.priority, event.requires_road_closure
+            )
+            rec_police = res["police_officers"]
+            rec_barricades = res["barricades"]
+        else:
+            rec_police = int(target_police)
+            rec_barricades = int(target_barricades)
+
+        # 2. Get current dispatched forces
+        curr_police = event.dispatched_officers or 0
+        curr_barricades = event.dispatched_barricades or 0
+
+        # Calculate delta (additional resources needed)
+        delta_police = max(0, rec_police - curr_police)
+        delta_barricades = max(0, rec_barricades - curr_barricades)
+
+        # 3. Find nearest station
+        nearest = self.find_nearest_station(event.latitude, event.longitude)
+        station_id = nearest["id"]
+
+        # Ensure station is seeded in DB
+        db_station = db.query(models.PoliceStation).filter(models.PoliceStation.id == station_id).first()
+        if not db_station:
+            db_station = models.PoliceStation(
+                id=station_id,
+                station_name=nearest["station_name"],
+                latitude=nearest["latitude"],
+                longitude=nearest["longitude"],
+                phone=nearest["phone"],
+                available_officers=nearest["available_officers"]
+            )
+            db.add(db_station)
+            db.commit()
+
+        # 4. Construct dispatch message based on situation
+        if curr_police == 0 and curr_barricades == 0:
+            # Initial dispatch — always send SMS
+            msg = (
+                f"BTP DISPATCH: Incident {event.event_id} at {event.junction} "
+                f"({event.latitude:.4f},{event.longitude:.4f}). "
+                f"Crowd detected. Send: {rec_police} officers, {rec_barricades} barricades. "
+                f"Nearest: {nearest['station_name']} ({nearest['distance_km']:.1f}km, ETA {nearest['eta_minutes']}min)."
+            )
+        elif delta_police > 0 or delta_barricades > 0:
+            # Escalation — crowd has grown, more resources needed
+            msg = (
+                f"BTP ESCALATION: Incident {event.event_id} at {event.junction} crowd growing. "
+                f"Send {delta_police} MORE officers, {delta_barricades} MORE barricades. "
+                f"Total deployed: {rec_police} officers, {rec_barricades} barricades."
+            )
+        else:
+            # Situation stable — crowd at same or lower level, send status update
+            msg = (
+                f"BTP STATUS: Incident {event.event_id} at {event.junction} — "
+                f"Crowd stable. Current deployment: {curr_police} officers, {curr_barricades} barricades sufficient."
+            )
+
+        # Always send SMS for any crowd detection
+        dispatch_log = self.simulate_sms_dispatch(nearest["phone"], msg)
+
+        # Log alert
+        db_alert = models.Alert(
+            event_id=event.event_id,
+            station_id=station_id,
+            recipient_phone=nearest["phone"],
+            status=dispatch_log["status"],
+            payload=msg
+        )
+        db.add(db_alert)
+
+        # Update event record with max deployed resources
+        event.dispatched_officers = max(curr_police, rec_police)
+        event.dispatched_barricades = max(curr_barricades, rec_barricades)
+        db.commit()
+
+        # 5. Broadcast to WebSocket Operator Screens
+        ws_payload = {
+            "event": "DISPATCH_UPDATE",
+            "data": {
+                "event_id": event.event_id,
+                "junction": event.junction,
+                "latitude": event.latitude,
+                "longitude": event.longitude,
+                "congestion_level": event.prediction.predicted_congestion if event.prediction else "Medium",
+                "delay_min": event.prediction.predicted_delay_min if event.prediction else 15,
+                "police_deployed": event.dispatched_officers,
+                "dispatched_officers": event.dispatched_officers,
+                "dispatched_barricades": event.dispatched_barricades,
+                "delta_officers": delta_police,
+                "delta_barricades": delta_barricades,
+                "alert_message": msg,
+                "timestamp": datetime.datetime.utcnow().isoformat()
+            }
+        }
+        
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        if loop.is_running():
+            loop.create_task(ws_manager.broadcast(ws_payload))
+        else:
+            loop.run_until_complete(ws_manager.broadcast(ws_payload))
+
+        return msg
+
 alert_service = AlertService()

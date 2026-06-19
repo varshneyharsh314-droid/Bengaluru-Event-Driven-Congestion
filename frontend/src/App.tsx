@@ -17,12 +17,15 @@ import TimelineReplay from './pages/TimelineReplay';
 import FeedbackCenter from './pages/FeedbackCenter';
 import About from './pages/About';
 import IncidentCenter from './pages/IncidentCenter';
+import CitizenDashboard from './pages/CitizenDashboard';
 
 function Layout({ children, onLogout, user }: { children: React.ReactNode, onLogout: () => void, user: any }) {
   const location = useLocation();
   const [activeAlert, setActiveAlert] = useState<string | null>(null);
 
   useEffect(() => {
+    if (user?.role === 'citizen') return; // Citizens do not monitor operational alerts
+    
     // Setup real-time WebSocket listener
     const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/alerts`;
     const socket = new WebSocket(wsUrl);
@@ -32,6 +35,8 @@ function Layout({ children, onLogout, user }: { children: React.ReactNode, onLog
         const payload = JSON.parse(event.data);
         if (payload.event === "CRITICAL_TRAFFIC_ALERT") {
           setActiveAlert(payload.data.alert_message);
+        } else if (payload.event === "DISPATCH_UPDATE") {
+          setActiveAlert(payload.data.alert_message);
         }
       } catch (e) {
         console.error("WS parse error:", e);
@@ -39,20 +44,27 @@ function Layout({ children, onLogout, user }: { children: React.ReactNode, onLog
     };
 
     return () => socket.close();
-  }, []);
+  }, [user]);
 
-  const menuItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Spatial Heatmap', path: '/heatmap', icon: Map },
-    { name: 'Crowd Intelligence', path: '/crowd', icon: Users },
-    { name: 'Resource Allocator', path: '/resources', icon: Wrench },
-    { name: 'Diversion Recommendation', path: '/diversion', icon: RefreshCw },
-    { name: 'Police Dispatcher', path: '/alerts', icon: Siren },
-    { name: 'Timeline Replay', path: '/timeline', icon: Clock },
-    { name: 'Feedback & Retraining', path: '/feedback', icon: Radio },
-    { name: 'Incident Center', path: '/incidents', icon: ShieldAlert },
-    { name: 'System Info', path: '/about', icon: HelpCircle },
-  ];
+  const menuItems = user?.role === 'citizen'
+    ? [
+        { name: 'Citizen Dashboard', path: '/', icon: LayoutDashboard },
+        { name: 'System Info', path: '/about', icon: HelpCircle },
+      ]
+    : [
+        { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+        { name: 'Spatial Heatmap', path: '/heatmap', icon: Map },
+        { name: 'Crowd Intelligence', path: '/crowd', icon: Users },
+        { name: 'Resource Allocator', path: '/resources', icon: Wrench },
+        { name: 'Diversion Recommendation', path: '/diversion', icon: RefreshCw },
+        { name: 'Police Dispatcher', path: '/alerts', icon: Siren },
+        { name: 'Timeline Replay', path: '/timeline', icon: Clock },
+        { name: 'Feedback & Retraining', path: '/feedback', icon: Radio },
+        { name: 'Incident Center', path: '/incidents', icon: ShieldAlert },
+        { name: 'System Info', path: '/about', icon: HelpCircle },
+      ];
+
+  const isCitizen = user?.role === 'citizen';
 
   return (
     <div className="flex h-screen bg-[#050B14] overflow-hidden text-slate-100 font-sans">
@@ -65,7 +77,9 @@ function Layout({ children, onLogout, user }: { children: React.ReactNode, onLog
               <Siren className="w-6 h-6 siren-glow" />
             </div>
             <div>
-              <h1 className="font-extrabold text-lg tracking-tight text-slate-100 leading-none">AI COMMAND CENTER</h1>
+              <h1 className="font-extrabold text-lg tracking-tight text-slate-100 leading-none">
+                {isCitizen ? "CITIZEN PORTAL" : "AI COMMAND CENTER"}
+              </h1>
               <span className="text-[10px] text-police-gold font-semibold uppercase tracking-wider">BENGALURU TRAFFIC POLICE</span>
             </div>
           </div>
@@ -122,8 +136,14 @@ function Layout({ children, onLogout, user }: { children: React.ReactNode, onLog
         {/* Top Header */}
         <header className="h-20 bg-[#0B132B]/85 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-8 z-10 select-none">
           <div>
-            <h2 className="text-xl font-black tracking-tight text-slate-100">SMART CITY OPERATIONS TERMINAL</h2>
-            <p className="text-xs text-slate-400">Operational Dispatch, AI Congestion Analytics & CCTV Vision Calibration</p>
+            <h2 className="text-xl font-black tracking-tight text-slate-100">
+              {isCitizen ? "CITIZEN REPORTING PORTAL" : "SMART CITY OPERATIONS TERMINAL"}
+            </h2>
+            <p className="text-xs text-slate-400">
+              {isCitizen 
+                ? "Upload congestion photos, lock exact GPS locations, and request automated dispatch squads." 
+                : "Operational Dispatch, AI Congestion Analytics & CCTV Vision Calibration"}
+            </p>
           </div>
           <div className="flex items-center space-x-4">
             <div className="px-3.5 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-emerald-400 text-xs font-semibold flex items-center space-x-1.5">
@@ -162,25 +182,46 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
   const [email, setEmail] = useState('admin@bengalurutraffic.gov.in');
   const [password, setPassword] = useState('password');
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccessMsg(null);
     setLoading(true);
 
-    const formData = new FormData();
-    formData.append('username', email);
-    formData.append('password', password);
+    if (isRegistering) {
+      try {
+        await authApi.register({
+          email,
+          password,
+          role: 'citizen'
+        });
+        setSuccessMsg("Registration successful! You can now log in to the Citizen Portal.");
+        setIsRegistering(false);
+        setEmail(email);
+        setPassword('');
+      } catch (err: any) {
+        setError(err.response?.data?.detail || 'Registration failed. Email might already exist.');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      const formData = new FormData();
+      formData.append('username', email);
+      formData.append('password', password);
 
-    try {
-      await authApi.login(formData);
-      const user = await authApi.getMe();
-      onLogin(user);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Authentication credentials rejected.');
-    } finally {
-      setLoading(false);
+      try {
+        await authApi.login(formData);
+        const user = await authApi.getMe();
+        onLogin(user);
+      } catch (err: any) {
+        setError(err.response?.data?.detail || 'Authentication credentials rejected.');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -192,8 +233,17 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
             <Siren className="w-9 h-9 siren-glow" />
           </div>
           <h2 className="text-2xl font-black tracking-tight text-slate-100">BENGALURU TRAFFIC</h2>
-          <p className="text-xs text-police-gold uppercase font-bold tracking-wider">AI Command Center Portal</p>
+          <p className="text-xs text-police-gold uppercase font-bold tracking-wider">
+            {isRegistering ? "Citizen Registration" : "AI Command & Citizen Portal"}
+          </p>
         </div>
+
+        {successMsg && (
+          <div className="mb-6 p-4 bg-emerald-950/20 border border-emerald-500/30 rounded-lg flex items-center space-x-3 text-emerald-400 text-sm">
+            <CheckCircle className="w-5 h-5 flex-shrink-0" />
+            <span>{successMsg}</span>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 p-4 bg-police-red/10 border border-police-red/30 rounded-lg flex items-center space-x-3 text-police-red text-sm">
@@ -204,7 +254,9 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Operational Email</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+              {isRegistering ? "Email Address" : "Operational / Citizen Email"}
+            </label>
             <div className="relative">
               <Mail className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500" />
               <input
@@ -213,13 +265,13 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-[#0B132B] border border-slate-800 rounded-lg pl-11 pr-4 py-3 text-slate-100 text-sm focus:border-police-gold/50 focus:outline-none focus:ring-1 focus:ring-police-gold/50 transition-colors duration-200"
-                placeholder="E.g., admin@bengalurutraffic.gov.in"
+                placeholder={isRegistering ? "your.email@gmail.com" : "E.g., admin@bengalurutraffic.gov.in"}
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Control Password</label>
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Password</label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-500" />
               <input
@@ -242,12 +294,30 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
               <RefreshCw className="w-5 h-5 animate-spin" />
             ) : (
               <>
-                <span>ACCESS SECURE TERMINAL</span>
+                <span>{isRegistering ? "CREATE CITIZEN ACCOUNT" : "ACCESS SECURE PORTAL"}</span>
                 <ChevronRight className="w-4 h-4" />
               </>
             )}
           </button>
         </form>
+
+        <div className="mt-6 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setIsRegistering(!isRegistering);
+              setError(null);
+              setSuccessMsg(null);
+              setEmail(isRegistering ? 'admin@bengalurutraffic.gov.in' : '');
+              setPassword('');
+            }}
+            className="text-xs text-slate-400 hover:text-police-gold underline font-semibold transition-colors duration-200"
+          >
+            {isRegistering 
+              ? "Already have an account? Sign In" 
+              : "Need to report an issue? Sign Up as Citizen"}
+          </button>
+        </div>
 
         <div className="mt-8 text-center pt-6 border-t border-slate-800/40">
           <p className="text-[10px] text-slate-500 uppercase tracking-wider">Authorized Operational Command Personnel Only</p>
@@ -299,16 +369,26 @@ export default function App() {
     <Router>
       <Layout onLogout={handleLogout} user={user}>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/heatmap" element={<CongestionHeatmap />} />
-          <Route path="/crowd" element={<CrowdIntelligence />} />
-          <Route path="/resources" element={<ResourceAllocation />} />
-          <Route path="/diversion" element={<DiversionRecommendation />} />
-          <Route path="/alerts" element={<PoliceAlerts />} />
-          <Route path="/timeline" element={<TimelineReplay />} />
-          <Route path="/feedback" element={<FeedbackCenter />} />
-          <Route path="/incidents" element={<IncidentCenter />} />
-          <Route path="/about" element={<About />} />
+          {user?.role === 'citizen' ? (
+            <>
+              <Route path="/" element={<CitizenDashboard />} />
+              <Route path="/about" element={<About />} />
+              <Route path="*" element={<CitizenDashboard />} />
+            </>
+          ) : (
+            <>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/heatmap" element={<CongestionHeatmap />} />
+              <Route path="/crowd" element={<CrowdIntelligence />} />
+              <Route path="/resources" element={<ResourceAllocation />} />
+              <Route path="/diversion" element={<DiversionRecommendation />} />
+              <Route path="/alerts" element={<PoliceAlerts />} />
+              <Route path="/timeline" element={<TimelineReplay />} />
+              <Route path="/feedback" element={<FeedbackCenter />} />
+              <Route path="/incidents" element={<IncidentCenter />} />
+              <Route path="/about" element={<About />} />
+            </>
+          )}
         </Routes>
       </Layout>
     </Router>

@@ -7,31 +7,53 @@ export default function Dashboard() {
   const [timelineEvents, setTimelineEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchTimeline = async () => {
+  const fetchTimeline = async () => {
+    try {
+      // Load active database incidents first
+      const activeDbEvents = await trafficApi.getActiveIncidents();
+      
+      // Load timeline backup logs
+      const fallbackEvents = await trafficApi.getTimeline();
+      
+      // Merge: place database active events at the top, and append fallback events
+      const merged = [...activeDbEvents, ...fallbackEvents];
+      setTimelineEvents(merged.slice(0, 15));
+    } catch (e) {
+      console.error("Failed to load dashboard logs, using fallback:", e);
       try {
-        // Load active database incidents first
-        const activeDbEvents = await trafficApi.getActiveIncidents();
-        
-        // Load timeline backup logs
         const fallbackEvents = await trafficApi.getTimeline();
-        
-        // Merge: place database active events at the top, and append fallback events
-        const merged = [...activeDbEvents, ...fallbackEvents];
-        setTimelineEvents(merged.slice(0, 15));
-      } catch (e) {
-        console.error("Failed to load dashboard logs, using fallback:", e);
-        try {
-          const fallbackEvents = await trafficApi.getTimeline();
-          setTimelineEvents(fallbackEvents.slice(0, 15));
-        } catch (err) {
-          console.error("Timeline query fallback failed:", err);
+        setTimelineEvents(fallbackEvents.slice(0, 15));
+      } catch (err) {
+        console.error("Timeline query fallback failed:", err);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTimeline();
+
+    // Setup live WebSocket reload
+    const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/alerts`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (
+          payload.event === "NEW_INCIDENT" || 
+          payload.event === "DISPATCH_UPDATE" || 
+          payload.event === "CROWD_UPDATE"
+        ) {
+          fetchTimeline();
         }
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        console.error("Dashboard WS refresh parse error:", e);
       }
     };
-    fetchTimeline();
+
+    return () => socket.close();
   }, []);
 
   const totalIncidents = timelineEvents.length;

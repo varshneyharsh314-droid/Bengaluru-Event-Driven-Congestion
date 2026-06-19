@@ -138,6 +138,7 @@ class CrowdAnalysisResponse(BaseModel):
     barricades_recommended: int
     timestamp: datetime
     annotated_image_base64: Optional[str] = None
+    dispatch_message: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -207,6 +208,7 @@ class VideoAnalysisResponse(BaseModel):
     updated_congestion: Optional[str] = None
     police_recommended: Optional[int] = None
     barricades_recommended: Optional[int] = None
+    dispatch_message: Optional[str] = None
 
 # Dynamic Multi-Camera Simulator Routing Schemas
 class CongestionInput(BaseModel):

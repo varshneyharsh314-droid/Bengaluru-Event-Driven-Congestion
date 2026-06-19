@@ -30,6 +30,10 @@ class Event(Base):
     status = Column(String, default="active")  # active, cleared, unresolved
     description = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    dispatched_officers = Column(Integer, default=0)
+    dispatched_barricades = Column(Integer, default=0)
+    image_path = Column(String, nullable=True)
+    citizen_reporter_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     # Relationships
     prediction = relationship("CongestionPrediction", back_populates="event", uselist=False)

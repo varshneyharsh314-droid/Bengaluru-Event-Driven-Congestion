@@ -1,0 +1,86 @@
+# ========================
+# Python
+# ========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ========================
+# Secrets & Credentials
+# ========================
+backend/.env
+*.env
+!backend/.env.example
+
+# ========================
+# Database files
+# ========================
+*.db
+*.db-shm
+*.db-wal
+*.db.local_backup
+*.sqlite
+*.sqlite3
+
+# ========================
+# Node / Frontend
+# ========================
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+.npm
+
+# ========================
+# Vite cache
+# ========================
+frontend/.vite/
+frontend/node_modules/.vite/
+
+# ========================
+# ML Models & Large Binaries
+# ========================
+*.pt
+*.pth
+*.onnx
+*.joblib
+*.pkl
+*.pickle
+
+# ========================
+# Uploaded static files
+# ========================
+backend/app/static/uploads/
+
+# ========================
+# IDE / OS
+# ========================
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+
+# ========================
+# Local helper scripts
+# ========================
+backend/local_requirements.txt
+frontend/local_npm_dependencies.txt

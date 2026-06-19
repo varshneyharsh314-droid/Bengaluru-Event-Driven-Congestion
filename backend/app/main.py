@@ -15,6 +15,12 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
+# Create static directory and mount
+import os
+os.makedirs("app/static/uploads", exist_ok=True)
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
 # CORS Policy configuration
 app.add_middleware(
     CORSMiddleware,
@@ -195,6 +201,14 @@ async def websocket_video_analysis(websocket: WebSocket):
                                 db.add(db_pred)
                                 db.commit()
                                 print(f"Registered new database active incident: {event_id} at {junction}")
+                                
+                                # Trigger automated dispatch
+                                from app.services.alert_service import alert_service
+                                alert_service.trigger_automated_dispatch(db, db_event, target_police=summary_resources["police_recommended"], target_barricades=summary_resources["barricades_recommended"])
+                            else:
+                                # Trigger incremental dispatch for existing active incident
+                                from app.services.alert_service import alert_service
+                                alert_service.trigger_automated_dispatch(db, existing, target_police=summary_resources["police_recommended"], target_barricades=summary_resources["barricades_recommended"])
                         except Exception as ex:
                             print(f"Error logging crowd incident: {ex}")
                             db.rollback()
@@ -219,10 +233,35 @@ async def websocket_video_analysis(websocket: WebSocket):
 @app.on_event("startup")
 def startup_populate_data():
     """
-    Initializes PostgreSQL tables and populates seed data if empty.
+    Initializes PostgreSQL/SQLite tables and populates seed data if empty.
     """
     print("Initializing database tables...")
     Base.metadata.create_all(bind=engine)
+    
+    # Run dynamic schema updates for SQLite (if new fields don't exist)
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        cursor = db.execute(text("PRAGMA table_info(events);"))
+        columns = [row[1] for row in cursor.fetchall()]
+        if "dispatched_officers" not in columns:
+            print("Altering events table: adding dispatched_officers column...")
+            db.execute(text("ALTER TABLE events ADD COLUMN dispatched_officers INTEGER DEFAULT 0;"))
+        if "dispatched_barricades" not in columns:
+            print("Altering events table: adding dispatched_barricades column...")
+            db.execute(text("ALTER TABLE events ADD COLUMN dispatched_barricades INTEGER DEFAULT 0;"))
+        if "image_path" not in columns:
+            print("Altering events table: adding image_path column...")
+            db.execute(text("ALTER TABLE events ADD COLUMN image_path TEXT;"))
+        if "citizen_reporter_id" not in columns:
+            print("Altering events table: adding citizen_reporter_id column...")
+            db.execute(text("ALTER TABLE events ADD COLUMN citizen_reporter_id INTEGER;"))
+        db.commit()
+    except Exception as e:
+        print(f"Error checking/updating SQLite schema: {e}")
+        db.rollback()
+    finally:
+        db.close()
     
     db = SessionLocal()
     try:

@@ -85,6 +85,36 @@ export default function IncidentCenter() {
 
   useEffect(() => {
     fetchActiveIncidents();
+
+    // Setup live WebSocket reload
+    const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/alerts`;
+    const socket = new WebSocket(wsUrl);
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (
+          payload.event === "NEW_INCIDENT" || 
+          payload.event === "DISPATCH_UPDATE" || 
+          payload.event === "CROWD_UPDATE"
+        ) {
+          // Trigger silent reload (or show loading if empty)
+          const silentFetch = async () => {
+            try {
+              const data = await trafficApi.getActiveIncidents();
+              setIncidents(data);
+            } catch (err) {
+              console.error(err);
+            }
+          };
+          silentFetch();
+        }
+      } catch (e) {
+        console.error("IncidentCenter WS refresh parse error:", e);
+      }
+    };
+
+    return () => socket.close();
   }, []);
 
   const handleResolve = async (eventId: string) => {
@@ -188,15 +218,33 @@ export default function IncidentCenter() {
                 </div>
               )}
 
-              {/* Metrics grid */}
-              <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-400">
-                <div className="flex items-center space-x-2 bg-slate-900/30 p-2.5 rounded border border-slate-800/40">
-                  <Clock className="w-4 h-4 text-amber-400" />
-                  <span>Delay: {incident.delay_min} mins</span>
+              {/* Citizen Uploaded Image */}
+              {incident.image_path && (
+                <div className="relative border border-slate-800/80 rounded-lg overflow-hidden max-h-48 bg-slate-950 flex items-center justify-center">
+                  <img
+                    src={`http://${window.location.hostname}:8000${incident.image_path}`}
+                    alt="Citizen Reported Photo"
+                    className="max-h-48 w-full object-cover opacity-90 hover:opacity-100 transition-opacity duration-200"
+                  />
+                  <div className="absolute top-2 left-2 bg-[#0B132B]/85 border border-police-gold/30 rounded px-2 py-0.5 text-[9px] text-police-gold font-bold uppercase select-none">
+                    Citizen Uploaded Photo
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2 bg-slate-900/30 p-2.5 rounded border border-slate-800/40">
+              )}
+
+              {/* Metrics grid */}
+              <div className="grid grid-cols-3 gap-3 text-xs font-semibold text-slate-400">
+                <div className="flex items-center space-x-1.5 bg-slate-900/30 p-2 rounded border border-slate-800/40">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <span className="truncate">Delay: {incident.delay_min}m</span>
+                </div>
+                <div className="flex items-center space-x-1.5 bg-slate-900/30 p-2 rounded border border-slate-800/40">
                   <Activity className="w-4 h-4 text-emerald-400" />
-                  <span>Deployment: {incident.police_deployed} Officers</span>
+                  <span className="truncate">Police: {incident.dispatched_officers || incident.police_deployed}</span>
+                </div>
+                <div className="flex items-center space-x-1.5 bg-slate-900/30 p-2 rounded border border-slate-800/40">
+                  <Siren className="w-4 h-4 text-police-light" />
+                  <span className="truncate">Barricades: {incident.dispatched_barricades || 0}</span>
                 </div>
               </div>
 

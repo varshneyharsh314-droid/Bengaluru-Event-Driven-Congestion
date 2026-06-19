@@ -42,13 +42,15 @@ class Settings(BaseSettings):
     YOLO_MODEL_PATH: str = os.path.join(MODEL_DIR, "yolov8n.pt")
     POLICE_STATION_CSV: str = os.path.join(MODEL_DIR, "police_station.csv")
 
-    # Twilio SMS Configs
-    TWILIO_ACCOUNT_SID: str | None = os.getenv("TWILIO_ACCOUNT_SID", None)
-    TWILIO_AUTH_TOKEN: str | None = os.getenv("TWILIO_AUTH_TOKEN", None)
-    TWILIO_PHONE_NUMBER: str | None = os.getenv("TWILIO_PHONE_NUMBER", None)
-    TWILIO_RECIPIENT: str | None = os.getenv("TWILIO_RECIPIENT", None)
+    # Twilio SMS Configs — read directly from .env via pydantic-settings
+    TWILIO_ACCOUNT_SID: str | None = None
+    TWILIO_AUTH_TOKEN: str | None = None
+    TWILIO_PHONE_NUMBER: str | None = None
+    TWILIO_RECIPIENT: str | None = None
 
     class Config:
         case_sensitive = True
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 settings = Settings()

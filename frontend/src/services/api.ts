@@ -161,6 +161,23 @@ export const trafficApi = {
   resolveIncident: async (eventId: string) => {
     const response = await api.post(`/traffic/incidents/${eventId}/resolve`);
     return response.data;
+  },
+
+  submitCitizenReport: async (file: File, latitude: number, longitude: number, description: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('latitude', String(latitude));
+    formData.append('longitude', String(longitude));
+    formData.append('description', description);
+    const response = await api.post('/traffic/citizen-report', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  getCitizenReports: async () => {
+    const response = await api.get('/traffic/citizen-reports');
+    return response.data;
   }
 };
 
