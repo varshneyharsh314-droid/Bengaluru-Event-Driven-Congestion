@@ -25,7 +25,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, specify ["http://localhost:5173"] or Vercel URLs
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -70,15 +70,38 @@ async def websocket_video_analysis(websocket: WebSocket):
     await websocket.accept()
     tmp_path = None
     stop_event = threading.Event()
-    
     try:
-        # Receive video binary from client
-        video_bytes = await websocket.receive_bytes()
-
-        # Save to temp file
+        first_msg = await websocket.receive()
+        if first_msg.get("type") == "websocket.disconnect":
+            raise WebSocketDisconnect(first_msg.get("code", 1000))
+            
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
-            tmp.write(video_bytes)
             tmp_path = tmp.name
+            
+            if "bytes" in first_msg:
+                # Legacy mode: single message containing all video bytes
+                tmp.write(first_msg["bytes"])
+            elif "text" in first_msg:
+                # Chunked mode: first message is JSON metadata
+                import json
+                meta = json.loads(first_msg["text"])
+                if meta.get("type") == "start":
+                    # Keep receiving chunks
+                    while True:
+                        chunk_msg = await websocket.receive()
+                        if chunk_msg.get("type") == "websocket.disconnect":
+                            raise WebSocketDisconnect(chunk_msg.get("code", 1000))
+                        
+                        if "bytes" in chunk_msg:
+                            tmp.write(chunk_msg["bytes"])
+                        elif "text" in chunk_msg:
+                            meta_end = json.loads(chunk_msg["text"])
+                            if meta_end.get("type") == "end":
+                                break
+                else:
+                    raise ValueError("Invalid WebSocket message sequence")
+            else:
+                raise ValueError("Expected bytes or text message")
 
         loop = asyncio.get_running_loop()
         queue = asyncio.Queue()
@@ -240,28 +263,29 @@ def startup_populate_data():
     
     # Run dynamic schema updates for SQLite (if new fields don't exist)
     from sqlalchemy import text
-    db = SessionLocal()
-    try:
-        cursor = db.execute(text("PRAGMA table_info(events);"))
-        columns = [row[1] for row in cursor.fetchall()]
-        if "dispatched_officers" not in columns:
-            print("Altering events table: adding dispatched_officers column...")
-            db.execute(text("ALTER TABLE events ADD COLUMN dispatched_officers INTEGER DEFAULT 0;"))
-        if "dispatched_barricades" not in columns:
-            print("Altering events table: adding dispatched_barricades column...")
-            db.execute(text("ALTER TABLE events ADD COLUMN dispatched_barricades INTEGER DEFAULT 0;"))
-        if "image_path" not in columns:
-            print("Altering events table: adding image_path column...")
-            db.execute(text("ALTER TABLE events ADD COLUMN image_path TEXT;"))
-        if "citizen_reporter_id" not in columns:
-            print("Altering events table: adding citizen_reporter_id column...")
-            db.execute(text("ALTER TABLE events ADD COLUMN citizen_reporter_id INTEGER;"))
-        db.commit()
-    except Exception as e:
-        print(f"Error checking/updating SQLite schema: {e}")
-        db.rollback()
-    finally:
-        db.close()
+    if engine.name == "sqlite":
+        db = SessionLocal()
+        try:
+            cursor = db.execute(text("PRAGMA table_info(events);"))
+            columns = [row[1] for row in cursor.fetchall()]
+            if "dispatched_officers" not in columns:
+                print("Altering events table: adding dispatched_officers column...")
+                db.execute(text("ALTER TABLE events ADD COLUMN dispatched_officers INTEGER DEFAULT 0;"))
+            if "dispatched_barricades" not in columns:
+                print("Altering events table: adding dispatched_barricades column...")
+                db.execute(text("ALTER TABLE events ADD COLUMN dispatched_barricades INTEGER DEFAULT 0;"))
+            if "image_path" not in columns:
+                print("Altering events table: adding image_path column...")
+                db.execute(text("ALTER TABLE events ADD COLUMN image_path TEXT;"))
+            if "citizen_reporter_id" not in columns:
+                print("Altering events table: adding citizen_reporter_id column...")
+                db.execute(text("ALTER TABLE events ADD COLUMN citizen_reporter_id INTEGER;"))
+            db.commit()
+        except Exception as e:
+            print(f"Error checking/updating SQLite schema: {e}")
+            db.rollback()
+        finally:
+            db.close()
     
     db = SessionLocal()
     try:

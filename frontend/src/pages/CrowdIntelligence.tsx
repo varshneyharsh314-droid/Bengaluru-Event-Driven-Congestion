@@ -409,9 +409,20 @@ export default function CrowdIntelligence() {
     }));
 
     const sendFile = async () => {
-      const buffer = await file.arrayBuffer();
-      if (socket.readyState === WebSocket.OPEN) {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: 'start', fileName: file.name, fileSize: file.size }));
+      const chunkSize = 500 * 1024;
+      let offset = 0;
+      while (offset < file.size) {
+        if (socket.readyState !== WebSocket.OPEN) break;
+        const slice = file.slice(offset, offset + chunkSize);
+        const buffer = await slice.arrayBuffer();
         socket.send(buffer);
+        offset += chunkSize;
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'end' }));
       }
     };
 
@@ -663,9 +674,20 @@ export default function CrowdIntelligence() {
 
     // Wait for connection, then send video binary
     const sendVideoFile = async () => {
-      const buffer = await videoFile.arrayBuffer();
-      if (socket.readyState === WebSocket.OPEN) {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({ type: 'start', fileName: videoFile.name, fileSize: videoFile.size }));
+      const chunkSize = 500 * 1024;
+      let offset = 0;
+      while (offset < videoFile.size) {
+        if (socket.readyState !== WebSocket.OPEN) break;
+        const slice = videoFile.slice(offset, offset + chunkSize);
+        const buffer = await slice.arrayBuffer();
         socket.send(buffer);
+        offset += chunkSize;
+        await new Promise(resolve => setTimeout(resolve, 15));
+      }
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'end' }));
       }
     };
 
