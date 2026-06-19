@@ -562,6 +562,17 @@ def log_feedback(
     db.refresh(db_feedback)
     return db_feedback
 
+@router.get("/feedback/count")
+def get_feedback_count(
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_user)
+):
+    """
+    Returns the count of feedback records logged.
+    """
+    count = db.query(models.Feedback).count()
+    return {"count": count}
+
 @router.post("/execute-retraining", response_model=schemas.RetrainingStats)
 def execute_retraining(
     background_tasks: BackgroundTasks,

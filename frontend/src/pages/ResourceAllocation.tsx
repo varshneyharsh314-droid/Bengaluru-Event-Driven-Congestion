@@ -211,12 +211,12 @@ export default function ResourceAllocation() {
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Page Header */}
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
         <div>
           <h1 className="text-3xl font-black tracking-tight">TACTICAL BARRICADES & RESOURCE OPTIMIZER</h1>
           <p className="text-sm text-slate-400">Model road closures, place physical barricades on the graph network, and calculate police dispatch requirements.</p>
         </div>
-        <div className="flex items-center space-x-2 bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-lg">
+        <div className="flex items-center space-x-2 bg-slate-900/60 border border-slate-800 px-3 py-1.5 rounded-lg self-start sm:self-auto flex-shrink-0">
           <Construction className="w-4.5 h-4.5 text-amber-500" />
           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Cordon Planner V2</span>
         </div>
@@ -225,7 +225,7 @@ export default function ResourceAllocation() {
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
         {/* Left Side: Parameters and Controls */}
         <div className="xl:col-span-2 space-y-6">
-          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6">
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6 hover-scale-premium animate-slide-up delay-75">
             <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3 flex items-center space-x-2 select-none">
               <Settings2 className="w-4.5 h-4.5 text-police-gold" />
               <span>Optimization Parameters</span>
@@ -289,7 +289,7 @@ export default function ResourceAllocation() {
           </div>
 
           {/* Interactive Manual Barricades Placement Panel */}
-          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4">
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 hover-scale-premium animate-slide-up delay-100">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 flex items-center space-x-2">
                 <Sliders className="w-4 h-4 text-slate-400" />
@@ -345,7 +345,7 @@ export default function ResourceAllocation() {
           </div>
 
           {/* Allocation Details & Action Plan */}
-          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 hover-scale-premium animate-slide-up delay-150">
             <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-3 flex items-center space-x-2">
               <Info className="w-4 h-4 text-slate-400" />
               <span>Cordon Deployment Plan</span>
@@ -391,7 +391,7 @@ export default function ResourceAllocation() {
         <div className="lg:col-span-3 space-y-6">
           {/* Resource recommendations metrics */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-blue select-none">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-blue select-none hover-scale-premium animate-slide-up delay-75">
               <div>
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Officer Personnel</span>
                 <span className="text-2xl font-black text-slate-100">{police} Officers</span>
@@ -402,7 +402,7 @@ export default function ResourceAllocation() {
               </div>
             </div>
 
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-gold select-none">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-gold select-none hover-scale-premium animate-slide-up delay-100">
               <div>
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Barricades Recommended</span>
                 <span className="text-2xl font-black text-slate-100">{barricades + manualBarricades.length} Units</span>
@@ -413,7 +413,7 @@ export default function ResourceAllocation() {
               </div>
             </div>
 
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-blue select-none">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 flex items-center justify-between shadow-lg glow-blue select-none hover-scale-premium animate-slide-up delay-150">
               <div>
                 <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">VMS Boards Needed</span>
                 <span className="text-2xl font-black text-slate-100">{vms} Boards</span>
@@ -426,7 +426,7 @@ export default function ResourceAllocation() {
           </div>
 
           {/* Tactical Map */}
-          <div className="h-[520px] glass-panel rounded-xl overflow-hidden border border-slate-800 relative shadow-2xl">
+          <div className="h-[350px] sm:h-[500px] glass-panel rounded-xl overflow-hidden border border-slate-800 relative shadow-2xl animate-fade-in delay-200">
             <MapContainer center={[12.9234, 77.6412]} zoom={13.5} scrollWheelZoom={true}>
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

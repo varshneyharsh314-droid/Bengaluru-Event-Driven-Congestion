@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { trafficApi } from '../services/api';
+import { trafficApi, getWsUrl } from '../services/api';
 import { LayoutDashboard, ShieldAlert, Users, Clock, Siren, ChevronRight } from 'lucide-react';
 
 export default function Dashboard() {
@@ -35,7 +35,7 @@ export default function Dashboard() {
     fetchTimeline();
 
     // Setup live WebSocket reload
-    const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/alerts`;
+    const wsUrl = getWsUrl('/traffic/ws/alerts');
     const socket = new WebSocket(wsUrl);
 
     socket.onmessage = (event) => {

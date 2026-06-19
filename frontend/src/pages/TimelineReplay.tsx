@@ -76,7 +76,7 @@ export default function TimelineReplay() {
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
         {/* Left Control Panel */}
         <div className="xl:col-span-2 space-y-6">
-          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 hover-scale-premium animate-slide-up delay-75">
             <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3 flex items-center space-x-2">
               <Clock className="w-4.5 h-4.5 text-police-gold" />
               <span>Time Control Center</span>
@@ -133,7 +133,7 @@ export default function TimelineReplay() {
           </div>
 
           {/* Active Gridlocks Feed */}
-          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 max-h-[300px] overflow-y-auto">
+          <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 max-h-[300px] overflow-y-auto hover-scale-premium animate-slide-up delay-150">
             <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-3">
               Active Gridlocks ({activeEvents.length})
             </h3>
@@ -162,7 +162,7 @@ export default function TimelineReplay() {
         </div>
 
         {/* Right Map Panel */}
-        <div className="xl:col-span-3 h-[600px] glass-panel rounded-xl overflow-hidden border border-slate-800 shadow-2xl">
+        <div className="xl:col-span-3 h-[350px] sm:h-[500px] lg:h-[600px] glass-panel rounded-xl overflow-hidden border border-slate-800 shadow-2xl animate-fade-in delay-200">
           <MapContainer center={[12.9234, 77.6412]} zoom={13} scrollWheelZoom={true}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

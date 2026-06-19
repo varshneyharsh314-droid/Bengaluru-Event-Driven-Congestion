@@ -1,7 +1,22 @@
+/// <reference types="vite/client" />
 import axios from 'axios';
 
 // Create API client with proxy-friendly path
-const API_URL = '/api';
+export const API_URL = (import.meta.env.VITE_API_URL as string) || '/api';
+
+export const getWsUrl = (path: string) => {
+  const customWsUrl = import.meta.env.VITE_WS_URL as string;
+  if (customWsUrl) {
+    return `${customWsUrl}${path}`;
+  }
+  
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? `${window.location.hostname}:8000`
+    : window.location.host;
+  
+  return `${protocol}//${host}${API_URL}${path}`;
+};
 
 const api = axios.create({
   baseURL: API_URL,
@@ -110,6 +125,11 @@ export const trafficApi = {
     return response.data;
   },
   
+  getFeedbackCount: async () => {
+    const response = await api.get('/traffic/feedback/count');
+    return response.data;
+  },
+  
   executeRetraining: async () => {
     const response = await api.post('/traffic/execute-retraining');
     return response.data;
@@ -191,9 +211,10 @@ export function connectVideoWs(
   onError?: (err: Event) => void,
   junction?: string
 ) {
-  const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/video-analysis${
+  const path = `/traffic/ws/video-analysis${
     junction ? `?junction=${encodeURIComponent(junction)}` : ''
   }`;
+  const wsUrl = getWsUrl(path);
   const socket = new WebSocket(wsUrl);
 
   socket.onmessage = (event) => {

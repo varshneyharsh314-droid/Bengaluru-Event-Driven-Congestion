@@ -20,6 +20,21 @@ const redIcon = createMarkerIcon('red');
 const cyanIcon = createMarkerIcon('cyan');
 const blueIcon = createMarkerIcon('blue');
 
+const fetchOSRMRoute = async (coordinates: [number, number][]) => {
+  if (coordinates.length < 2) return coordinates;
+  try {
+    const coordsString = coordinates.map(([lat, lon]) => `${lon},${lat}`).join(';');
+    const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
+    const data = await response.json();
+    if (data.routes && data.routes[0]) {
+      return data.routes[0].geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon]);
+    }
+  } catch (error) {
+    console.error("OSRM Routing Error:", error);
+  }
+  return coordinates;
+};
+
 type AnalysisMode = 'image' | 'video' | 'simulation';
 
 interface VideoStreamState {
@@ -112,6 +127,8 @@ export default function CrowdIntelligence() {
   const [baseCongestion, setBaseCongestion] = useState('Medium');
   const [priority, setPriority] = useState('High');
   const [closure, setClosure] = useState(true);
+
+  const [edgeGeometries, setEdgeGeometries] = useState<Record<string, [number, number][]>>({});
 
   // Simulation mode state
   interface SimCamera {
@@ -244,6 +261,71 @@ export default function CrowdIntelligence() {
     }, 1500);
     return () => clearInterval(interval);
   }, [mode, recalculateRoute]);
+
+  useEffect(() => {
+    const fetchAllEdgeGeometries = async () => {
+      const nodeCoordsLookup: Record<string, [number, number]> = {};
+      junctionList.forEach(node => {
+        nodeCoordsLookup[node.name] = [node.lat, node.lon];
+      });
+
+      const uniqueEdges = edgesList.filter((edge, index, self) =>
+        index === self.findIndex((e) => (
+          (e.source === edge.source && e.target === edge.target) ||
+          (e.source === edge.target && e.target === edge.source)
+        ))
+      );
+
+      const geometries: Record<string, [number, number][]> = {};
+
+      await Promise.all(uniqueEdges.map(async (edge) => {
+        const u = nodeCoordsLookup[edge.source];
+        const v = nodeCoordsLookup[edge.target];
+        if (!u || !v) return;
+        
+        const snapped = await fetchOSRMRoute([u, v]);
+        const keyForward = `${edge.source}_${edge.target}`;
+        const keyBackward = `${edge.target}_${edge.source}`;
+        geometries[keyForward] = snapped;
+        geometries[keyBackward] = [...snapped].reverse();
+      }));
+
+      setEdgeGeometries(geometries);
+    };
+
+    if (junctionList.length > 0 && edgesList.length > 0) {
+      fetchAllEdgeGeometries();
+    }
+  }, [junctionList, edgesList]);
+
+  const getOptimalRouteGeometry = (): [number, number][] => {
+    const optimalRoute = routingResult?.optimal_route || [];
+    if (optimalRoute.length < 2) return [];
+
+    const coords: [number, number][] = [];
+    for (let i = 0; i < optimalRoute.length - 1; i++) {
+      const key = `${optimalRoute[i]}_${optimalRoute[i+1]}`;
+      const edgeGeo = edgeGeometries[key];
+      if (edgeGeo) {
+        if (coords.length > 0 && edgeGeo.length > 0) {
+          coords.push(...edgeGeo.slice(1));
+        } else {
+          coords.push(...edgeGeo);
+        }
+      } else {
+        const nodeCoordsLookup: Record<string, [number, number]> = {};
+        junctionList.forEach(node => {
+          nodeCoordsLookup[node.name] = [node.lat, node.lon];
+        });
+        const u = nodeCoordsLookup[optimalRoute[i]];
+        const v = nodeCoordsLookup[optimalRoute[i+1]];
+        if (u && v) {
+          coords.push(u, v);
+        }
+      }
+    }
+    return coords;
+  };
 
   const startCameraWs = async (cameraId: number, file: File) => {
     const existingCam = simCameras.find(c => c.id === cameraId);
@@ -937,10 +1019,13 @@ export default function CrowdIntelligence() {
                           if (edge.congestion_level === 'High') edgeColor = '#ef4444'; // Red
                           if (edge.congestion_level === 'Extreme') edgeColor = '#7f1d1d'; // Dark Red (Gridlock)
 
+                          const key = `${edge.source}_${edge.target}`;
+                          const positions = edgeGeometries[key] || [u, v];
+
                           return (
                             <Polyline
                               key={`edge-${index}`}
-                              positions={[u, v]}
+                              positions={positions}
                               pathOptions={{ color: edgeColor, weight: 4, opacity: 0.8 }}
                             />
                           );
@@ -949,18 +1034,11 @@ export default function CrowdIntelligence() {
 
                       {/* Render optimal route highlight */}
                       {(() => {
-                        const nodeCoordsLookup: Record<string, [number, number]> = {};
-                        junctionList.forEach(node => {
-                          nodeCoordsLookup[node.name] = [node.lat, node.lon];
-                        });
-
-                        const optimalRoute = routingResult?.optimal_route || [];
-                        const routePositions = optimalRoute.map((node: string) => nodeCoordsLookup[node]).filter(Boolean);
-
-                        if (routePositions.length > 1) {
+                        const coords = getOptimalRouteGeometry();
+                        if (coords.length > 1) {
                           return (
                             <Polyline
-                              positions={routePositions}
+                              positions={coords}
                               pathOptions={{ color: '#00ffff', weight: 6, opacity: 0.95 }}
                             />
                           );
@@ -1096,13 +1174,16 @@ export default function CrowdIntelligence() {
                           {cam.isStreaming ? (
                             /* Streaming Frame View */
                             <div className="space-y-2">
-                              <div className="h-[120px] rounded-lg bg-[#050B14] border border-slate-800/50 flex items-center justify-center overflow-hidden">
+                              <div className="h-[120px] rounded-lg bg-[#050B14] border border-slate-800/50 flex items-center justify-center overflow-hidden relative">
                                 {cam.currentFrame ? (
-                                  <img 
-                                    src={cam.currentFrame} 
-                                    alt={`Camera ${cam.id} visual stream`} 
-                                    className="max-h-full max-w-full object-contain"
-                                  />
+                                  <>
+                                    <img 
+                                      src={cam.currentFrame} 
+                                      alt={`Camera ${cam.id} visual stream`} 
+                                      className="max-h-full max-w-full object-contain"
+                                    />
+                                    <div className="absolute inset-x-0 h-0.5 bg-police-gold/40 shadow-[0_0_8px_#dcba55] animate-radar-sweep pointer-events-none z-10" />
+                                  </>
                                 ) : (
                                   <div className="text-center text-slate-600 flex flex-col items-center">
                                     <RefreshCw className="w-5 h-5 animate-spin mb-1 text-police-gold" />
@@ -1186,13 +1267,18 @@ export default function CrowdIntelligence() {
                   )}
                 </div>
 
-                <div className="flex flex-col justify-center items-center h-[300px] rounded-lg bg-[#050B14] border border-slate-800/50 overflow-hidden">
+                <div className="flex flex-col justify-center items-center h-[300px] rounded-lg bg-[#050B14] border border-slate-800/50 overflow-hidden relative">
                   {videoStream.currentFrame ? (
-                    <img 
-                      src={videoStream.currentFrame} 
-                      alt="Annotated video frame" 
-                      className="max-h-full max-w-full object-contain"
-                    />
+                    <>
+                      <img 
+                        src={videoStream.currentFrame} 
+                        alt="Annotated video frame" 
+                        className="max-h-full max-w-full object-contain"
+                      />
+                      {videoStream.isStreaming && (
+                        <div className="absolute inset-x-0 h-0.5 bg-police-gold/40 shadow-[0_0_8px_#dcba55] animate-radar-sweep pointer-events-none z-10" />
+                      )}
+                    </>
                   ) : videoPreviewUrl && !videoStream.isStreaming ? (
                     <video 
                       src={videoPreviewUrl}

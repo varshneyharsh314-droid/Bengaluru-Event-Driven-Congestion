@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle } from 'react-leaflet';
 import L from 'leaflet';
 import { trafficApi } from '../services/api';
@@ -29,6 +29,21 @@ const createMarkerIcon = (color: string) => {
 
 const blueIcon = createMarkerIcon('blue');
 
+const fetchOSRMRoute = async (coordinates: [number, number][]) => {
+  if (coordinates.length < 2) return coordinates;
+  try {
+    const coordsString = coordinates.map(([lat, lon]) => `${lon},${lat}`).join(';');
+    const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordsString}?overview=full&geometries=geojson`);
+    const data = await response.json();
+    if (data.routes && data.routes[0]) {
+      return data.routes[0].geometry.coordinates.map(([lon, lat]: [number, number]) => [lat, lon]);
+    }
+  } catch (error) {
+    console.error("OSRM Routing Error:", error);
+  }
+  return coordinates;
+};
+
 export default function DiversionRecommendation() {
   const [source, setSource] = useState('SilkBoardJunc');
   const [destination, setDestination] = useState('IbblurJunction');
@@ -45,6 +60,38 @@ export default function DiversionRecommendation() {
   const [routeData, setRouteData] = useState<any | null>(null);
   const [diversionText, setDiversionText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const [snappedNormalRoute, setSnappedNormalRoute] = useState<[number, number][]>([]);
+  const [snappedEmergencyRoute, setSnappedEmergencyRoute] = useState<[number, number][]>([]);
+
+  useEffect(() => {
+    const fetchRoutes = async () => {
+      if (!routeData) {
+        setSnappedNormalRoute([]);
+        setSnappedEmergencyRoute([]);
+        return;
+      }
+      
+      const normalNodes = routeData.normal_route || [];
+      const normalCoords = normalNodes.map((node: string) => junctionCoords[node]).filter(Boolean) as [number, number][];
+      if (normalCoords.length > 1) {
+        const snapped = await fetchOSRMRoute(normalCoords);
+        setSnappedNormalRoute(snapped);
+      } else {
+        setSnappedNormalRoute([]);
+      }
+
+      const emergencyNodes = routeData.emergency_route || [];
+      const emergencyCoords = emergencyNodes.map((node: string) => junctionCoords[node]).filter(Boolean) as [number, number][];
+      if (emergencyCoords.length > 1) {
+        const snapped = await fetchOSRMRoute(emergencyCoords);
+        setSnappedEmergencyRoute(snapped);
+      } else {
+        setSnappedEmergencyRoute([]);
+      }
+    };
+    fetchRoutes();
+  }, [routeData]);
 
   const handleCalculate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +152,7 @@ export default function DiversionRecommendation() {
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
         {/* Left Form Panel */}
         <div className="xl:col-span-2 space-y-6">
-          <form onSubmit={handleCalculate} className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
+          <form onSubmit={handleCalculate} className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 hover-scale-premium animate-slide-up delay-75">
             <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3 flex items-center space-x-2">
               <Sparkles className="w-4.5 h-4.5 text-police-gold" />
               <span>Routing Settings</span>
@@ -228,7 +275,7 @@ export default function DiversionRecommendation() {
 
           {/* Rerouting analysis result */}
           {routeData && (
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 animate-fade-in">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 animate-slide-up hover-scale-premium delay-150">
               <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-3">Routing Analysis</h3>
               
               <div className="grid grid-cols-2 gap-4">
@@ -269,7 +316,7 @@ export default function DiversionRecommendation() {
         </div>
 
         {/* Right Map Panel */}
-        <div className="xl:col-span-3 h-[600px] glass-panel rounded-xl overflow-hidden border border-slate-800 shadow-2xl">
+        <div className="xl:col-span-3 h-[350px] sm:h-[500px] lg:h-[600px] glass-panel rounded-xl overflow-hidden border border-slate-800 shadow-2xl animate-fade-in delay-200">
           <MapContainer center={[12.9234, 77.6412]} zoom={13} scrollWheelZoom={true}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -287,15 +334,15 @@ export default function DiversionRecommendation() {
             ))}
 
             {/* Draw Path Polylines */}
-            {normalRouteCoords.length > 0 && (
+            {snappedNormalRoute.length > 0 && (
               <Polyline 
-                positions={normalRouteCoords} 
+                positions={snappedNormalRoute} 
                 pathOptions={{ color: 'red', weight: 4, opacity: 0.65, dashArray: '5, 10' }} 
               />
             )}
-            {emergencyRouteCoords.length > 0 && (
+            {snappedEmergencyRoute.length > 0 && (
               <Polyline 
-                positions={emergencyRouteCoords} 
+                positions={snappedEmergencyRoute} 
                 pathOptions={{ color: '#10b981', weight: 6, opacity: 0.95 }} 
               />
             )}

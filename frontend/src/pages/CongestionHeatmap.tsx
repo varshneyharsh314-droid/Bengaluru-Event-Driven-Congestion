@@ -93,7 +93,7 @@ export default function CongestionHeatmap() {
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-8">
         {/* Left Column: Form Inputs & Predictions */}
         <div className="xl:col-span-2 space-y-6">
-          <form onSubmit={handlePredict} className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5">
+          <form onSubmit={handlePredict} className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 hover-scale-premium animate-slide-up delay-75">
             <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3 flex items-center space-x-2">
               <Sparkles className="w-4.5 h-4.5 text-police-gold" />
               <span>Inference Parameters</span>
@@ -229,7 +229,7 @@ export default function CongestionHeatmap() {
 
           {/* Inference results */}
           {prediction && (
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 animate-fade-in">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 animate-slide-up hover-scale-premium delay-150">
               <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-3">Prediction Matrix</h3>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400">Severity Prediction:</span>
@@ -287,7 +287,7 @@ export default function CongestionHeatmap() {
         </div>
 
         {/* Right Column: Leaflet Map */}
-        <div className="xl:col-span-3 h-[600px] glass-panel rounded-xl overflow-hidden border border-slate-800 relative shadow-2xl">
+        <div className="xl:col-span-3 h-[350px] sm:h-[500px] lg:h-[600px] glass-panel rounded-xl overflow-hidden border border-slate-800 relative shadow-2xl animate-fade-in delay-200">
           <MapContainer center={[12.9234, 77.6412]} zoom={13} scrollWheelZoom={true}>
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

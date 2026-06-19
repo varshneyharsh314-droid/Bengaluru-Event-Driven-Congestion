@@ -77,7 +77,7 @@ export default function PoliceAlerts() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Side: Parameters Form */}
-        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6">
+        <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-6 hover-scale-premium animate-slide-up delay-75">
           <h3 className="font-extrabold text-sm uppercase tracking-wider text-police-gold border-b border-slate-800 pb-3 flex items-center space-x-2">
             <Siren className="w-4.5 h-4.5 text-police-gold" />
             <span>Dispatch Settings</span>
@@ -142,7 +142,7 @@ export default function PoliceAlerts() {
         {/* Right Side: Proximity Find Result and SMS logger */}
         <div className="lg:col-span-2 space-y-6">
           {nearestStation && (
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 animate-fade-in shadow-xl">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-5 animate-slide-up shadow-xl hover-scale-premium delay-100">
               <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300 border-b border-slate-800 pb-3">Nearest Resolved Station</h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -163,7 +163,7 @@ export default function PoliceAlerts() {
                 </div>
               </div>
 
-              <div className="flex justify-between items-center bg-slate-900/40 p-4 rounded border border-slate-800">
+              <div className="flex flex-col sm:flex-row gap-3 justify-between sm:items-center bg-slate-900/40 p-4 rounded border border-slate-800">
                 <div>
                   <span className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Contact Details / Dispatch Number</span>
                   <span className="text-sm font-extrabold text-slate-200">{nearestStation.phone}</span>
@@ -171,7 +171,7 @@ export default function PoliceAlerts() {
                 <button
                   onClick={handleDispatch}
                   disabled={loadingSend}
-                  className="px-5 py-2.5 bg-police-gold hover:bg-police-gold/90 text-[#0B132B] font-bold text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center space-x-1.5 shadow-lg shadow-police-gold/10"
+                  className="px-5 py-2.5 bg-police-gold hover:bg-police-gold/90 text-[#0B132B] font-bold text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-police-gold/10 w-full sm:w-auto flex-shrink-0"
                 >
                   {loadingSend ? <RefreshCw className="w-4 h-4 animate-spin" /> : (
                     <>
@@ -186,7 +186,7 @@ export default function PoliceAlerts() {
 
           {/* SMS Dispatch log */}
           {dispatchResult && (
-            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 animate-fade-in shadow-xl">
+            <div className="glass-panel p-6 rounded-xl border border-slate-800 space-y-4 animate-slide-up shadow-xl hover-scale-premium delay-150">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="font-extrabold text-sm uppercase tracking-wider text-slate-300">Twilio Gateway Log</h3>
                 <span className="px-2.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-[9px] text-emerald-400 font-bold uppercase">SMS TRANSMITTED</span>

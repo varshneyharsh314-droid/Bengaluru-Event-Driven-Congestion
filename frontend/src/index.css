@@ -62,3 +62,87 @@
 .siren-glow {
   animation: siren-pulse 2s infinite ease-in-out;
 }
+
+/* Custom CSS Keyframe Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(15px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-in-left {
+  animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Transition delays for staggered child animations */
+.delay-75 { animation-delay: 75ms; }
+.delay-100 { animation-delay: 100ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+
+/* Interactive Hover utilities */
+.hover-scale-premium {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.hover-scale-premium:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 10px 25px -5px rgba(58, 80, 107, 0.25);
+  border-color: rgba(220, 186, 85, 0.3);
+}
+/* Leaflet custom dark glass popups */
+.leaflet-popup-content-wrapper {
+  background: rgba(11, 19, 43, 0.9) !important;
+  color: #f1f5f9 !important;
+  border: 1px solid rgba(220, 186, 85, 0.25) !important;
+  backdrop-filter: blur(10px) !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+  border-radius: 0.75rem !important;
+}
+
+.leaflet-popup-tip {
+  background: rgba(11, 19, 43, 0.9) !important;
+  border-left: 1px solid rgba(220, 186, 85, 0.25) !important;
+  border-bottom: 1px solid rgba(220, 186, 85, 0.25) !important;
+}
+
+.leaflet-popup-content {
+  margin: 12px 16px !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* Sci-fi Command Center grid overlay */
+.tech-grid {
+  background-image: radial-gradient(rgba(58, 80, 107, 0.18) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Scanning scanline animations */
+@keyframes radarSweep {
+  0% { top: 0%; }
+  50% { top: 100%; }
+  100% { top: 0%; }
+}
+
+.animate-radar-sweep {
+  position: absolute;
+  animation: radarSweep 4s ease-in-out infinite;
+}

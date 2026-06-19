@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { trafficApi } from '../services/api';
+import { trafficApi, authApi, getWsUrl } from '../services/api';
 import { ShieldAlert, CheckCircle2, Clock, MapPin, MessageSquare, RefreshCw, AlertCircle, Activity, Siren, Phone, Send } from 'lucide-react';
 
 export default function IncidentCenter() {
@@ -7,6 +7,31 @@ export default function IncidentCenter() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // User badge resolution state
+  const [badge, setBadge] = useState('KA-POL-8124');
+
+  // Ground Truth Resolution Feedback Modal States
+  const [activeResolveIncident, setActiveResolveIncident] = useState<any | null>(null);
+  const [actualDelay, setActualDelay] = useState(30);
+  const [actualCongestion, setActualCongestion] = useState('Medium');
+  const [actualOutcome, setActualOutcome] = useState('Normal Clearance');
+  const [actualComments, setActualComments] = useState('');
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const u = await authApi.getMe();
+        if (u && u.officer_badge) {
+          setBadge(u.officer_badge);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchUser();
+  }, []);
 
   // Dispatch Modal States
   const [activeDispatchIncident, setActiveDispatchIncident] = useState<any | null>(null);
@@ -87,7 +112,7 @@ export default function IncidentCenter() {
     fetchActiveIncidents();
 
     // Setup live WebSocket reload
-    const wsUrl = `ws://${window.location.hostname}:8000/api/traffic/ws/alerts`;
+    const wsUrl = getWsUrl('/traffic/ws/alerts');
     const socket = new WebSocket(wsUrl);
 
     socket.onmessage = (event) => {
@@ -117,32 +142,62 @@ export default function IncidentCenter() {
     return () => socket.close();
   }, []);
 
-  const handleResolve = async (eventId: string) => {
-    setActionLoading(eventId);
+  const handleInitiateResolve = (incident: any) => {
+    setActiveResolveIncident(incident);
+    setActualDelay(incident.delay_min || 30);
+    setActualCongestion(incident.congestion_level || 'Medium');
+    setActualOutcome('Normal Clearance');
+    setActualComments(`Incident at ${incident.junction} cleared by ground support.`);
+  };
+
+  const handleConfirmResolve = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeResolveIncident) return;
+    setSubmittingFeedback(true);
     try {
-      await trafficApi.resolveIncident(eventId);
-      // Refresh list
+      // 1. Submit ground truth feedback
+      const feedbackPayload = {
+        event_id: activeResolveIncident.event_id,
+        officer_badge: badge,
+        actual_delay_min: Number(actualDelay),
+        actual_congestion: actualCongestion,
+        event_outcome: actualOutcome,
+        comments: actualComments
+      };
+      await trafficApi.submitFeedback(feedbackPayload);
+
+      // 2. Resolve incident in DB
+      await trafficApi.resolveIncident(activeResolveIncident.event_id);
+
+      // 3. Clear modal and reload list
+      setActiveResolveIncident(null);
       const data = await trafficApi.getActiveIncidents();
       setIncidents(data);
     } catch (err) {
-      console.error("Resolve error:", err);
-      alert("Failed to resolve incident.");
+      console.error(err);
+      alert("Failed to submit resolution logs. Clearing ticket directly.");
+      try {
+        await trafficApi.resolveIncident(activeResolveIncident.event_id);
+        setActiveResolveIncident(null);
+        const data = await trafficApi.getActiveIncidents();
+        setIncidents(data);
+      } catch (ex) {
+        console.error(ex);
+      }
     } finally {
-      setActionLoading(null);
+      setSubmittingFeedback(false);
     }
-  };
-
-  return (
-    <div className="space-y-8 animate-fade-in">
+  };  return (
+    <div className="space-y-8 animate-fade-in text-slate-100">
       {/* Page Header */}
-      <div className="flex justify-between items-center select-none">
+      <div className="flex flex-col sm:flex-row gap-4 justify-between sm:items-center select-none">
         <div>
           <h1 className="text-3xl font-black tracking-tight">OPERATIONAL INCIDENT CENTER</h1>
           <p className="text-sm text-slate-400">Review and manually clear active crowd congestion anomalies and ML-logged traffic incidents.</p>
         </div>
         <button
           onClick={fetchActiveIncidents}
-          className="p-2.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg flex items-center space-x-2 transition-all duration-200"
+          className="p-2.5 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 self-start sm:self-auto flex-shrink-0"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           <span className="text-xs font-bold uppercase tracking-wider">Refresh</span>
@@ -177,10 +232,10 @@ export default function IncidentCenter() {
                   : incident.congestion_level === 'Medium'
                   ? 'border-t-amber-500 shadow-amber-950/5'
                   : 'border-t-blue-500 shadow-blue-950/5'
-              } p-6 rounded-xl flex flex-col justify-between space-y-5 transition-transform duration-200 hover:scale-[1.01]`}
+              } p-6 rounded-xl flex flex-col justify-between space-y-5 hover-scale-premium animate-slide-up`}
             >
               {/* Card Header */}
-              <div className="flex justify-between items-start">
+              <div className="flex justify-between items-start gap-4">
                 <div>
                   <div className="flex items-center space-x-2">
                     <span className="font-mono text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-900/60 px-2 py-0.5 rounded border border-slate-800/80">
@@ -199,7 +254,7 @@ export default function IncidentCenter() {
                     <span>{incident.junction}</span>
                   </h3>
                 </div>
-                <span className={`px-2.5 py-0.5 rounded text-[10px] font-black uppercase border select-none ${
+                <span className={`px-2.5 py-0.5 rounded text-[10px] font-black uppercase border select-none flex-shrink-0 ${
                   incident.congestion_level === 'High' || incident.congestion_level === 'Extreme'
                     ? 'bg-red-500/15 border-red-500/20 text-police-red'
                     : incident.congestion_level === 'Medium'
@@ -233,48 +288,42 @@ export default function IncidentCenter() {
               )}
 
               {/* Metrics grid */}
-              <div className="grid grid-cols-3 gap-3 text-xs font-semibold text-slate-400">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-semibold text-slate-400">
                 <div className="flex items-center space-x-1.5 bg-slate-900/30 p-2 rounded border border-slate-800/40">
-                  <Clock className="w-4 h-4 text-amber-400" />
+                  <Clock className="w-4 h-4 text-amber-400 flex-shrink-0" />
                   <span className="truncate">Delay: {incident.delay_min}m</span>
                 </div>
                 <div className="flex items-center space-x-1.5 bg-slate-900/30 p-2 rounded border border-slate-800/40">
-                  <Activity className="w-4 h-4 text-emerald-400" />
+                  <Activity className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                   <span className="truncate">Police: {incident.dispatched_officers || incident.police_deployed}</span>
                 </div>
                 <div className="flex items-center space-x-1.5 bg-slate-900/30 p-2 rounded border border-slate-800/40">
-                  <Siren className="w-4 h-4 text-police-light" />
+                  <Siren className="w-4 h-4 text-police-light flex-shrink-0" />
                   <span className="truncate">Barricades: {incident.dispatched_barricades || 0}</span>
                 </div>
               </div>
 
               {/* Action Button */}
-              <div className="border-t border-slate-800/60 pt-4 flex justify-between items-center text-[10px] text-slate-500 font-bold uppercase">
+              <div className="border-t border-slate-800/60 pt-4 flex flex-col sm:flex-row gap-3 justify-between sm:items-center text-[10px] text-slate-500 font-bold uppercase">
                 <span>Reported: {incident.timestamp ? new Date(incident.timestamp).toLocaleString() : 'N/A'}</span>
                 
-                <div className="flex space-x-2">
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                   <button
                     onClick={() => handleInitiateDispatch(incident)}
                     disabled={actionLoading !== null}
-                    className="px-4.5 py-2 bg-police-gold hover:bg-police-gold/90 disabled:opacity-40 text-[#0B132B] font-bold rounded-lg transition-colors flex items-center space-x-1.5"
+                    className="px-4 py-2.5 bg-police-gold hover:bg-police-gold/90 disabled:opacity-40 text-[#0B132B] font-bold rounded-lg transition-colors flex items-center justify-center space-x-1.5 w-full sm:w-auto flex-shrink-0"
                   >
                     <Siren className="w-3.5 h-3.5" />
                     <span>Dispatch Alert</span>
                   </button>
 
                   <button
-                    onClick={() => handleResolve(incident.event_id)}
+                    onClick={() => handleInitiateResolve(incident)}
                     disabled={actionLoading !== null}
-                    className="px-4.5 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-slate-900 font-black rounded-lg transition-colors flex items-center space-x-1.5"
+                    className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-slate-950 font-black rounded-lg transition-colors flex items-center justify-center space-x-1.5 w-full sm:w-auto flex-shrink-0"
                   >
-                    {actionLoading === incident.event_id ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Mark Resolved</span>
-                      </>
-                    )}
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Mark Resolved</span>
                   </button>
                 </div>
               </div>
@@ -286,7 +335,7 @@ export default function IncidentCenter() {
       {/* Dispatch Modal Overlay */}
       {activeDispatchIncident && (
         <div className="fixed inset-0 z-50 bg-[#050B14]/80 backdrop-blur-sm flex items-center justify-center p-4 select-none">
-          <div className="glass-panel w-full max-w-xl border border-slate-800 rounded-xl p-6 space-y-6 shadow-2xl relative bg-[#0B132B] animate-fade-in">
+          <div className="glass-panel w-full max-w-xl border border-slate-800 rounded-xl p-6 space-y-6 shadow-2xl relative bg-[#0B132B] animate-slide-up">
             {/* Close button */}
             <button
               onClick={() => setActiveDispatchIncident(null)}
@@ -327,7 +376,7 @@ export default function IncidentCenter() {
                   </div>
 
                   {/* Form parameters */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1.5">Expected Delay</label>
                       <input 
@@ -357,7 +406,7 @@ export default function IncidentCenter() {
                     </div>
                   </div>
 
-                  <div className="flex justify-between items-center bg-[#050B14] p-4 rounded border border-slate-800">
+                  <div className="flex flex-col sm:flex-row gap-3 justify-between sm:items-center bg-[#050B14] p-4 rounded border border-slate-800">
                     <div>
                       <span className="block text-[8px] font-bold text-slate-500 uppercase mb-1">Contact Number</span>
                       <span className="text-xs font-extrabold text-slate-200">{nearestStation.phone}</span>
@@ -365,7 +414,7 @@ export default function IncidentCenter() {
                     <button
                       onClick={handleDispatch}
                       disabled={loadingSend}
-                      className="px-5 py-2.5 bg-police-gold hover:bg-police-gold/90 text-[#0B132B] font-bold text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center space-x-1.5 shadow-lg shadow-police-gold/15"
+                      className="px-5 py-2.5 bg-police-gold hover:bg-police-gold/90 text-[#0B132B] font-bold text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-police-gold/15 w-full sm:w-auto flex-shrink-0"
                     >
                       {loadingSend ? <RefreshCw className="w-4 h-4 animate-spin" /> : (
                         <>
@@ -397,6 +446,115 @@ export default function IncidentCenter() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Resolution Feedback Modal Overlay */}
+      {activeResolveIncident && (
+        <div className="fixed inset-0 z-50 bg-[#050B14]/80 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-fade-in">
+          <div className="glass-panel w-full max-w-xl border border-slate-800 rounded-xl p-6 space-y-6 shadow-2xl relative bg-[#0B132B] animate-slide-up">
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => setActiveResolveIncident(null)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-200 font-bold text-lg transition-colors"
+            >
+              ✕
+            </button>
+
+            <h3 className="font-extrabold text-sm uppercase tracking-wider text-emerald-400 border-b border-slate-800 pb-3 flex items-center space-x-2">
+              <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400" />
+              <span>Incident Resolution Ground Truth Feedback</span>
+            </h3>
+
+            <form onSubmit={handleConfirmResolve} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-[#050B14] p-3 rounded border border-slate-800">
+                  <span className="block text-[8px] font-bold text-slate-500 uppercase mb-1">Event ID</span>
+                  <span className="text-xs font-mono font-bold text-slate-300">{activeResolveIncident.event_id}</span>
+                </div>
+                <div className="bg-[#050B14] p-3 rounded border border-slate-800">
+                  <span className="block text-[8px] font-bold text-slate-500 uppercase mb-1">Junction / Location</span>
+                  <span className="text-xs font-extrabold text-slate-300">{activeResolveIncident.junction}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1.5">Actual Delay (mins)</label>
+                  <input 
+                    type="number" 
+                    value={actualDelay} 
+                    onChange={(e) => setActualDelay(Number(e.target.value))}
+                    className="w-full bg-[#050B14] border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:border-emerald-500/50 focus:outline-none transition-colors"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1.5">Actual Congestion</label>
+                  <select
+                    value={actualCongestion}
+                    onChange={(e) => setActualCongestion(e.target.value)}
+                    className="w-full bg-[#050B14] border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:border-emerald-500/50 focus:outline-none transition-colors"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Extreme">Extreme</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1.5">Event Outcome</label>
+                  <select
+                    value={actualOutcome}
+                    onChange={(e) => setActualOutcome(e.target.value)}
+                    className="w-full bg-[#050B14] border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:border-emerald-500/50 focus:outline-none transition-colors"
+                  >
+                    <option value="Normal Clearance">Normal Clearance</option>
+                    <option value="Rerouted / Diverted">Rerouted / Diverted</option>
+                    <option value="Escalated to High Priority">Escalated to High Priority</option>
+                    <option value="False Positive Anomaly">False Positive Anomaly</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-bold text-slate-400 uppercase mb-1.5">Resolution Notes & Observations</label>
+                <textarea
+                  value={actualComments}
+                  onChange={(e) => setActualComments(e.target.value)}
+                  placeholder="Provide ground observations to calibrate the prediction engines..."
+                  rows={3}
+                  className="w-full bg-[#050B14] border border-slate-800 rounded p-2.5 text-xs text-slate-200 focus:border-emerald-500/50 focus:outline-none transition-colors resize-none"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 border-t border-slate-800/80 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setActiveResolveIncident(null)}
+                  className="px-4 py-2 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-bold uppercase transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingFeedback}
+                  className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-slate-950 font-black text-xs uppercase tracking-wider rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-500/10"
+                >
+                  {submittingFeedback ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Resolve & Feed ML</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
