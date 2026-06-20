@@ -143,6 +143,7 @@ def analyze_crowd(
     priority: str = Form(...),
     requires_road_closure: bool = Form(...),
     file: UploadFile = File(...),
+    ai_managed: bool = Form(False),
     db: Session = Depends(deps.get_db),
     current_user: models.User = Depends(deps.get_current_user)
 ):
@@ -151,6 +152,38 @@ def analyze_crowd(
     Recalculates deployment demands based on density feedback and logs results.
     """
     event = db.query(models.Event).filter(models.Event.event_id == event_id).first()
+    
+    if ai_managed:
+        if event:
+            priority = event.priority
+            requires_road_closure = event.requires_road_closure
+            pred_record = db.query(models.CongestionPrediction).filter(
+                models.CongestionPrediction.event_id == event_id
+            ).first()
+            if pred_record:
+                base_congestion = pred_record.predicted_congestion
+            else:
+                event_dict = {
+                    "event_type": event.event_type,
+                    "event_cause": event.event_cause,
+                    "priority": event.priority,
+                    "requires_road_closure": event.requires_road_closure,
+                    "hour": event.hour,
+                    "day_of_week": event.day_of_week,
+                    "duration_hours": event.duration_hours,
+                    "zone": event.zone,
+                    "junction": event.junction,
+                    "latitude": event.latitude,
+                    "longitude": event.longitude,
+                    "description": event.description
+                }
+                pred_res = congestion_service.predict(event_dict)
+                base_congestion = pred_res["predicted_congestion"]
+        else:
+            priority = "Medium"
+            requires_road_closure = False
+            base_congestion = "Medium"
+
     if not event:
         # Auto-create the event so crowd analysis can always proceed and trigger dispatch
         import datetime as _dt

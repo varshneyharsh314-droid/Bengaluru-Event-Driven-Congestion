@@ -81,13 +81,16 @@ export const trafficApi = {
     return response.data;
   },
   
-  analyzeCrowd: async (payload: { event_id: string; base_congestion: string; priority: string; requires_road_closure: boolean; file: File }) => {
+  analyzeCrowd: async (payload: { event_id: string; base_congestion: string; priority: string; requires_road_closure: boolean; file: File; ai_managed?: boolean }) => {
     const formData = new FormData();
     formData.append('event_id', payload.event_id);
     formData.append('base_congestion', payload.base_congestion);
     formData.append('priority', payload.priority);
     formData.append('requires_road_closure', String(payload.requires_road_closure));
     formData.append('file', payload.file);
+    if (payload.ai_managed !== undefined) {
+      formData.append('ai_managed', String(payload.ai_managed));
+    }
     
     const response = await api.post('/traffic/analyze-crowd', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -209,11 +212,23 @@ export function connectVideoWs(
   onMessage: (data: any) => void,
   onClose?: () => void,
   onError?: (err: Event) => void,
-  junction?: string
+  junction?: string,
+  baseCongestion?: string,
+  priority?: string,
+  requiresRoadClosure?: boolean,
+  aiManaged?: boolean,
+  eventId?: string
 ) {
-  const path = `/traffic/ws/video-analysis${
-    junction ? `?junction=${encodeURIComponent(junction)}` : ''
-  }`;
+  const params = new URLSearchParams();
+  if (junction) params.append('junction', junction);
+  if (baseCongestion) params.append('base_congestion', baseCongestion);
+  if (priority) params.append('priority', priority);
+  if (requiresRoadClosure !== undefined) params.append('requires_road_closure', String(requiresRoadClosure));
+  if (aiManaged !== undefined) params.append('ai_managed', String(aiManaged));
+  if (eventId) params.append('event_id', eventId);
+  
+  const queryStr = params.toString();
+  const path = `/traffic/ws/video-analysis${queryStr ? `?${queryStr}` : ''}`;
   const wsUrl = getWsUrl(path);
   const socket = new WebSocket(wsUrl);
 

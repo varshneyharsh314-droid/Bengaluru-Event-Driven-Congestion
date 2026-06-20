@@ -66,6 +66,53 @@ async def websocket_video_analysis(websocket: WebSocket):
     base_congestion = websocket.query_params.get("base_congestion", "Medium")
     priority = websocket.query_params.get("priority", "High")
     requires_road_closure = websocket.query_params.get("requires_road_closure", "true").lower() == "true"
+    ai_managed = websocket.query_params.get("ai_managed", "false").lower() == "true"
+    event_id = websocket.query_params.get("event_id")
+
+    if ai_managed and event_id:
+        from app.core.database import SessionLocal
+        from app.db import models
+        from app.services.congestion_service import congestion_service
+        
+        db = SessionLocal()
+        try:
+            event = db.query(models.Event).filter(models.Event.event_id == event_id).first()
+            if event:
+                priority = event.priority
+                requires_road_closure = event.requires_road_closure
+                
+                # Check for logged prediction
+                pred_record = db.query(models.CongestionPrediction).filter(
+                    models.CongestionPrediction.event_id == event_id
+                ).first()
+                if pred_record:
+                    base_congestion = pred_record.predicted_congestion
+                else:
+                    # Run ML prediction model manually
+                    event_dict = {
+                        "event_type": event.event_type,
+                        "event_cause": event.event_cause,
+                        "priority": event.priority,
+                        "requires_road_closure": event.requires_road_closure,
+                        "hour": event.hour,
+                        "day_of_week": event.day_of_week,
+                        "duration_hours": event.duration_hours,
+                        "zone": event.zone,
+                        "junction": event.junction,
+                        "latitude": event.latitude,
+                        "longitude": event.longitude,
+                        "description": event.description
+                    }
+                    pred_res = congestion_service.predict(event_dict)
+                    base_congestion = pred_res["predicted_congestion"]
+            else:
+                priority = "Medium"
+                requires_road_closure = False
+                base_congestion = "Medium"
+        except Exception as e:
+            print(f"Error resolving AI calibration for WS: {e}")
+        finally:
+            db.close()
 
     await websocket.accept()
     tmp_path = None

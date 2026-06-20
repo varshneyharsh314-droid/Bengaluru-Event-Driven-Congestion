@@ -127,6 +127,7 @@ export default function CrowdIntelligence() {
   const [baseCongestion, setBaseCongestion] = useState('Medium');
   const [priority, setPriority] = useState('High');
   const [closure, setClosure] = useState(true);
+  const [aiManaged, setAiManaged] = useState(false);
 
   const [edgeGeometries, setEdgeGeometries] = useState<Record<string, [number, number][]>>({});
 
@@ -575,7 +576,8 @@ export default function CrowdIntelligence() {
         base_congestion: baseCongestion,
         priority: priority,
         requires_road_closure: closure,
-        file: selectedFile
+        file: selectedFile,
+        ai_managed: aiManaged
       };
       
       const res = await trafficApi.analyzeCrowd(payload);
@@ -664,10 +666,13 @@ export default function CrowdIntelligence() {
         setVideoStream(prev => ({ ...prev, isStreaming: false }));
         setLoading(false);
       },
-      () => {
-        setVideoStream(prev => ({ ...prev, isStreaming: false }));
-        setLoading(false);
-      }
+      undefined,
+      undefined,
+      baseCongestion,
+      priority,
+      closure,
+      aiManaged,
+      eventId
     );
 
     wsRef.current = socket;
@@ -890,15 +895,40 @@ export default function CrowdIntelligence() {
                   className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
                 />
               </div>
+              
+              {/* AI Managed Mode Toggle */}
+              <div className="flex items-center justify-between p-3.5 bg-[#0B132B] border border-slate-800 rounded-lg select-none">
+                <div>
+                  <span className="block text-xs font-bold text-slate-200 uppercase">AI-Managed Mode</span>
+                  <span className="block text-[9px] text-slate-400">Operator-free parameters calibration</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAiManaged(!aiManaged)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    aiManaged ? 'bg-police-gold' : 'bg-slate-800 border border-slate-700/50'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      aiManaged ? 'translate-x-4 bg-[#0B132B]' : 'translate-x-0 bg-slate-400'
+                    }`}
+                  />
+                </button>
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Base Congestion</label>
                   <select 
-                    value={baseCongestion}
+                    value={aiManaged ? "AI Calibrated" : baseCongestion}
                     onChange={(e) => setBaseCongestion(e.target.value)}
-                    className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                    disabled={aiManaged}
+                    className={`w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none transition-all ${
+                      aiManaged ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
+                    {aiManaged && <option value="AI Calibrated">AI Calibrated</option>}
                     <option value="Low">Low</option>
                     <option value="Medium">Medium</option>
                     <option value="High">High</option>
@@ -908,10 +938,14 @@ export default function CrowdIntelligence() {
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Priority</label>
                   <select 
-                    value={priority}
+                    value={aiManaged ? "AI Calibrated" : priority}
                     onChange={(e) => setPriority(e.target.value)}
-                    className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                    disabled={aiManaged}
+                    className={`w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none transition-all ${
+                      aiManaged ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
                   >
+                    {aiManaged && <option value="AI Calibrated">AI Calibrated</option>}
                     <option value="High">High</option>
                     <option value="Medium">Medium</option>
                     <option value="Low">Low</option>
@@ -922,10 +956,14 @@ export default function CrowdIntelligence() {
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2">Requires Closure</label>
                 <select 
-                  value={String(closure)}
+                  value={aiManaged ? "AI Calibrated" : String(closure)}
                   onChange={(e) => setClosure(e.target.value === 'true')}
-                  className="w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none"
+                  disabled={aiManaged}
+                  className={`w-full bg-[#0B132B] border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none transition-all ${
+                    aiManaged ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
                 >
+                  {aiManaged && <option value="AI Calibrated">AI Calibrated</option>}
                   <option value="true">Yes</option>
                   <option value="false">No</option>
                 </select>
